@@ -43,6 +43,15 @@ def index_drive():
                 print(f"Skipping corrupted directory: {dir_path}")
         dirs[:] = readable_dirs  # Update directories in-place to drop bad ones
 
+        for d in readable_dirs:
+            dir_path = os.path.join(root, d)
+            try:
+                stat_info = os.stat(dir_path)
+                mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                file_records.append((d, dir_path, "directory", 0, mod_time))
+            except (OSError, FileNotFoundError):
+                continue
+
         for file in files:
             full_path = os.path.join(root, file)
             try:

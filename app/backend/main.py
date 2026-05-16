@@ -6,10 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import aiosqlite
 import hashlib
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
 import shutil
 from datetime import datetime
+import io
+import zipfile
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "stats.db")
 
@@ -61,6 +63,17 @@ class MkdirRequest(BaseModel):
     path: str
     folder_name: str
 
+class FavoriteItem(BaseModel):
+    path: str
+    type: str
+    name: str
+
+class BulkFavoriteRequest(BaseModel):
+    items: list[FavoriteItem]
+
+class BulkDeleteRequest(BaseModel):
+    paths: list[str]
+
 @app.get("/api/stats")
 async def get_stats():
     stats = {
@@ -84,6 +97,10 @@ async def get_stats():
             ext = ext.lower() if ext else ""
             count = row["count"]
             size = row["size"] or 0
+            
+            if ext == "directory":
+                continue
+                
             stats["total_size"] += size
             
             if ext in IMAGE_EXTENSIONS:
@@ -96,7 +113,7 @@ async def get_stats():
                 stats["files"] += count
                 
         # Count unique folders
-        cursor = await db.execute("SELECT COUNT(DISTINCT substr(filepath, 1, length(filepath) - length(filename))) as folder_count FROM files")
+        cursor = await db.execute("SELECT COUNT(*) as folder_count FROM files WHERE extension = 'directory'")
         folder_row = await cursor.fetchone()
         if folder_row:
             stats["folders"] = folder_row["folder_count"]
@@ -140,6 +157,7 @@ async def get_recent_activity():
                    CASE WHEN fav.path IS NOT NULL THEN 1 ELSE 0 END as is_favorite
             FROM files f
             LEFT JOIN favorites fav ON f.filepath = fav.path
+            WHERE f.extension != 'directory'
             ORDER BY f.modified_time DESC 
             LIMIT 5
         ''')
@@ -406,6 +424,169 @@ async def upload_file(path: str = Form(...), file: UploadFile = File(...)):
         return {"status": "success", "filepath": target_filepath}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/files/search")
+async def search_files(q: str = ""):
+    if not q:
+        return []
+    async with aiosqlite.connect(DB_PATH) as db:
+        query_pattern = f"%{q}%"
+        cursor = await db.execute('''
+            SELECT filename, filepath, extension, size_bytes, modified_time 
+            FROM files 
+            WHERE filename LIKE ? 
+            LIMIT 50
+        ''', (query_pattern,))
+        rows = await cursor.fetchall()
+        
+        results = []
+        for row in rows:
+            name, path, ext, size, mod_time = row
+            if ext == "directory":
+                item_type = "Folder"
+            elif ext in IMAGE_EXTENSIONS:
+                item_type = "Image"
+            elif ext in VIDEO_EXTENSIONS:
+                item_type = "Video"
+            elif ext in MUSIC_EXTENSIONS:
+                item_type = "Music"
+            elif ext in PDF_EXTENSIONS:
+                item_type = "PDF"
+            elif ext in TEXT_EXTENSIONS:
+                item_type = "Text"
+            else:
+                item_type = "File"
+                
+            results.append({
+                "name": name,
+                "path": path,
+                "type": item_type,
+                "size": size,
+                "modified": mod_time
+            })
+        return results
+
+@app.get("/api/files/category")
+async def get_files_by_category(category: str):
+    ext_filter = None
+    exclude_others = False
+    
+    if category == "Images":
+        ext_filter = IMAGE_EXTENSIONS
+    elif category == "Videos":
+        ext_filter = VIDEO_EXTENSIONS
+    elif category == "Music":
+        ext_filter = MUSIC_EXTENSIONS
+    elif category == "Files":
+        exclude_others = True
+    else:
+        raise HTTPException(status_code=400, detail="Invalid category")
+        
+    async with aiosqlite.connect(DB_PATH) as db:
+        if ext_filter:
+            placeholders = ",".join(["?"] * len(ext_filter))
+            query = f'''
+                SELECT filename, filepath, extension, size_bytes, modified_time 
+                FROM files 
+                WHERE extension IN ({placeholders})
+            '''
+            cursor = await db.execute(query, tuple(ext_filter))
+        elif exclude_others:
+            all_media = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | MUSIC_EXTENSIONS | PDF_EXTENSIONS | TEXT_EXTENSIONS
+            placeholders = ",".join(["?"] * len(all_media))
+            query = f'''
+                SELECT filename, filepath, extension, size_bytes, modified_time 
+                FROM files 
+                WHERE extension NOT IN ({placeholders}) AND extension != 'directory'
+            '''
+            cursor = await db.execute(query, tuple(all_media))
+            
+        rows = await cursor.fetchall()
+        
+        results = []
+        for row in rows:
+            name, path, ext, size, mod_time = row
+            if ext in IMAGE_EXTENSIONS:
+                item_type = "Image"
+            elif ext in VIDEO_EXTENSIONS:
+                item_type = "Video"
+            elif ext in MUSIC_EXTENSIONS:
+                item_type = "Music"
+            elif ext in PDF_EXTENSIONS:
+                item_type = "PDF"
+            elif ext in TEXT_EXTENSIONS:
+                item_type = "Text"
+            else:
+                item_type = "File"
+                
+            results.append({
+                "name": name,
+                "path": path,
+                "type": item_type,
+                "size": size,
+                "modified": mod_time
+            })
+        return results
+
+@app.post("/api/files/bulk-favorite")
+async def bulk_favorite(req: BulkFavoriteRequest):
+    async with aiosqlite.connect(DB_PATH) as db:
+        for item in req.items:
+            await db.execute('''
+                INSERT OR REPLACE INTO favorites (path, type, name) 
+                VALUES (?, ?, ?)
+            ''', (item.path, item.type, item.name))
+        await db.commit()
+    return {"status": "success", "count": len(req.items)}
+
+@app.post("/api/files/bulk-delete")
+async def bulk_delete(req: BulkDeleteRequest):
+    async with aiosqlite.connect(DB_PATH) as db:
+        deleted_count = 0
+        for path in req.paths:
+            if not os.path.abspath(path).startswith("/mnt/Drive1"):
+                continue
+            if os.path.exists(path):
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+                    
+                    await db.execute('DELETE FROM files WHERE filepath = ? OR filepath LIKE ?', (path, path + '/%'))
+                    await db.execute('DELETE FROM favorites WHERE path = ? OR path LIKE ?', (path, path + '/%'))
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"Error deleting {path}: {e}")
+                    
+        await db.commit()
+    return {"status": "success", "count": deleted_count}
+
+@app.post("/api/files/bulk-download")
+async def bulk_download(req: BulkDeleteRequest):
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for path in req.paths:
+            if not os.path.abspath(path).startswith("/mnt/Drive1"):
+                continue
+            if os.path.exists(path):
+                if os.path.isdir(path):
+                    for root, _, files in os.walk(path):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(file_path, os.path.dirname(path))
+                            zip_file.write(file_path, rel_path)
+                else:
+                    zip_file.write(path, os.path.basename(path))
+                    
+    zip_buffer.seek(0)
+    
+    headers = {
+        "Content-Disposition": "attachment; filename=mycloud_archive.zip"
+    }
+    return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
+
 
 if __name__ == "__main__":
     import uvicorn

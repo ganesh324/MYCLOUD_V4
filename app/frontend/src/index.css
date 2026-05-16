@@ -52,37 +52,39 @@ button {
 
 .card {
   border-radius: 16px;
-  padding: 20px;
+  padding: 12px 16px;
   color: white;
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-height: 140px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  min-height: unset;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
 }
 
 .card-icon {
   background: rgba(255, 255, 255, 0.2);
-  padding: 8px;
+  padding: 6px;
   border-radius: 8px;
   display: inline-flex;
+  flex-shrink: 0;
 }
 
 .card-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 4px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin-bottom: 2px;
 }
 
 .card-subtitle {
-  font-size: 0.8rem;
-  opacity: 0.8;
+  font-size: 0.76rem;
+  opacity: 0.85;
 }
 
 /* Animations */
