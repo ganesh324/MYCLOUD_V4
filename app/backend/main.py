@@ -48,6 +48,8 @@ app.add_middleware(
 IMAGE_EXTENSIONS = {"bmp", "gif", "jpeg", "jpg", "png", "tga", "tif", "webp", "psd", "ico", "svg", "icns"}
 VIDEO_EXTENSIONS = {"3gp", "avi", "mkv", "mov", "mp4", "mts", "mxf", "vob", "wmv"}
 MUSIC_EXTENSIONS = {"mp3", "wav", "flac", "ogg", "aac"}
+PDF_EXTENSIONS = {"pdf"}
+TEXT_EXTENSIONS = {"txt", "md", "js", "jsx", "ts", "tsx", "json", "css", "html", "py", "sh", "yml", "yaml", "ini", "conf", "log"}
 
 class FavoriteToggleRequest(BaseModel):
     path: str
@@ -195,6 +197,10 @@ async def get_files_list(path: str = "/mnt/Drive1"):
                             item_type = "Video"
                         elif ext in MUSIC_EXTENSIONS:
                             item_type = "Music"
+                        elif ext in PDF_EXTENSIONS:
+                            item_type = "PDF"
+                        elif ext in TEXT_EXTENSIONS:
+                            item_type = "Text"
                         else:
                             item_type = "File"
                             
@@ -321,6 +327,31 @@ async def delete_file(req: DeleteRequest):
         await db.commit()
         
     return {"status": "success"}
+
+@app.get("/api/files/raw")
+async def get_raw_file(path: str):
+    if not os.path.abspath(path).startswith("/mnt/Drive1"):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if not os.path.exists(path) or os.path.isdir(path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    return FileResponse(path)
+
+@app.get("/api/files/text")
+async def get_text_file(path: str):
+    if not os.path.abspath(path).startswith("/mnt/Drive1"):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if not os.path.exists(path) or os.path.isdir(path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(1024 * 1024)
+        return {"content": content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

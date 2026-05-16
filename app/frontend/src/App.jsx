@@ -21,6 +21,11 @@ function App() {
   const [activeModal, setActiveModal] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [renameInput, setRenameInput] = useState('');
+  
+  // Preview States
+  const [previewItem, setPreviewItem] = useState(null);
+  const [previewTextContent, setPreviewTextContent] = useState('');
+  const [loadingPreviewText, setLoadingPreviewText] = useState(false);
 
   const openFolder = async (path) => {
     setCurrentView('fileManager');
@@ -161,6 +166,28 @@ function App() {
       }
     } catch (error) {
       console.error("Error deleting:", error);
+    }
+  };
+
+  const openPreview = async (item) => {
+    setPreviewItem(item);
+    if (item.type === 'Text') {
+      setLoadingPreviewText(true);
+      setPreviewTextContent('');
+      try {
+        const res = await fetch(`/api/files/text?path=${encodeURIComponent(item.path)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setPreviewTextContent(data.content);
+        } else {
+          setPreviewTextContent('Failed to load file content.');
+        }
+      } catch (error) {
+        console.error("Error reading text file:", error);
+        setPreviewTextContent('Error loading file content.');
+      } finally {
+        setLoadingPreviewText(false);
+      }
     }
   };
 
@@ -423,7 +450,7 @@ function App() {
                       <div 
                         key={idx} 
                         className="fm-item grid-item" 
-                        onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : null}
+                        onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
                       >
                         <div className="fm-actions-overlay">
                           <button className={`action-btn star ${item.is_favorite ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFavorite(item, false); }}>
@@ -475,7 +502,7 @@ function App() {
                           <tr 
                             key={idx} 
                             className="fm-list-row"
-                            onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : null}
+                            onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
                           >
                             <td>
                               <div className="fm-list-name-cell">
@@ -559,6 +586,83 @@ function App() {
             <div className="modal-footer">
               <button type="button" className="btn-modal-secondary" onClick={() => setActiveModal(null)}>Cancel</button>
               <button type="button" className="btn-modal-danger" onClick={handleDeleteSubmit}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* File Preview Modal */}
+      {previewItem && (
+        <div className="preview-backdrop" onClick={() => setPreviewItem(null)}>
+          <div className="preview-content glass" onClick={(e) => e.stopPropagation()}>
+            <div className="preview-header">
+              <div className="preview-title-info">
+                <span className="preview-badge">{previewItem.type}</span>
+                <span className="preview-filename" title={previewItem.name}>{previewItem.name}</span>
+              </div>
+              <div className="preview-actions">
+                <a 
+                  href={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} 
+                  download={previewItem.name} 
+                  className="btn-modal-primary"
+                  style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', fontSize: '0.85rem' }}
+                >
+                  Download
+                </a>
+                <button className="btn-icon close-btn" onClick={() => setPreviewItem(null)}>
+                  <Plus size={20} style={{ transform: 'rotate(45deg)' }} />
+                </button>
+              </div>
+            </div>
+            <div className="preview-body">
+              {previewItem.type === 'Image' ? (
+                <div className="preview-media-container">
+                  <img src={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} alt={previewItem.name} className="preview-image" />
+                </div>
+              ) : previewItem.type === 'PDF' ? (
+                <iframe 
+                  src={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} 
+                  width="100%" 
+                  height="100%" 
+                  style={{ border: 'none', borderRadius: '12px' }} 
+                  title={previewItem.name} 
+                />
+              ) : previewItem.type === 'Text' ? (
+                <div className="preview-text-container">
+                  {loadingPreviewText ? (
+                    <div className="preview-loading">Loading text content...</div>
+                  ) : (
+                    <pre className="preview-text-content">
+                      <code>{previewTextContent}</code>
+                    </pre>
+                  )}
+                </div>
+              ) : previewItem.type === 'Video' ? (
+                <div className="preview-media-container">
+                  <video src={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} controls className="preview-video" autoPlay />
+                </div>
+              ) : previewItem.type === 'Music' ? (
+                <div className="preview-media-container music">
+                  <div className="music-preview-card">
+                    <Music size={64} color="var(--primary)" />
+                    <span className="music-filename">{previewItem.name}</span>
+                    <audio src={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} controls autoPlay />
+                  </div>
+                </div>
+              ) : (
+                <div className="preview-unsupported">
+                  <FileText size={64} color="var(--text-muted)" />
+                  <p>Previews are not supported for this file type.</p>
+                  <a 
+                    href={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} 
+                    download={previewItem.name} 
+                    className="btn-modal-primary"
+                    style={{ textDecoration: 'none' }}
+                  >
+                    Download File
+                  </a>
+                </div>
+              )}
             </div>
           </div>
         </div>
