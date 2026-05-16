@@ -1,7 +1,7 @@
 import os
 import sqlite3
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import aiosqlite
@@ -9,6 +9,7 @@ import hashlib
 from fastapi.responses import FileResponse
 from PIL import Image
 import shutil
+from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "stats.db")
 
@@ -55,6 +56,10 @@ class FavoriteToggleRequest(BaseModel):
     path: str
     type: str
     name: str
+
+class MkdirRequest(BaseModel):
+    path: str
+    folder_name: str
 
 @app.get("/api/stats")
 async def get_stats():
@@ -350,6 +355,55 @@ async def get_text_file(path: str):
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read(1024 * 1024)
         return {"content": content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/files/mkdir")
+async def create_directory(req: MkdirRequest):
+    if not os.path.abspath(req.path).startswith("/mnt/Drive1"):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    target_dir = os.path.join(req.path, req.folder_name)
+    
+    if not req.folder_name or "/" in req.folder_name or "\\" in req.folder_name:
+        raise HTTPException(status_code=400, detail="Invalid folder name")
+        
+    if os.path.exists(target_dir):
+        raise HTTPException(status_code=400, detail="Folder already exists")
+        
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+        return {"status": "success", "path": target_dir}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/files/upload")
+async def upload_file(path: str = Form(...), file: UploadFile = File(...)):
+    if not os.path.abspath(path).startswith("/mnt/Drive1"):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if not os.path.exists(path) or not os.path.isdir(path):
+        raise HTTPException(status_code=400, detail="Target path is not a directory")
+        
+    target_filepath = os.path.join(path, file.filename)
+    
+    try:
+        with open(target_filepath, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        stat_info = os.stat(target_filepath)
+        size = stat_info.st_size
+        mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        ext = os.path.splitext(file.filename)[1].lower().replace(".", "")
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (file.filename, target_filepath, ext, size, mod_time))
+            await db.commit()
+            
+        return {"status": "success", "filepath": target_filepath}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

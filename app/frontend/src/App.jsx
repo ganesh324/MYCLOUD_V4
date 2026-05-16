@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Home, Folder, Star, Share2, Search, Upload, Plus, 
   Menu, MoreVertical, Image as ImageIcon, Video, Music, FileText, ChevronRight, ArrowLeft,
-  LayoutGrid, List, Trash2, Edit3
+  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, AlertCircle, Loader2
 } from 'lucide-react';
 import './App.css';
 
@@ -26,6 +26,12 @@ function App() {
   const [previewItem, setPreviewItem] = useState(null);
   const [previewTextContent, setPreviewTextContent] = useState('');
   const [loadingPreviewText, setLoadingPreviewText] = useState(false);
+
+  // Folder & Upload States
+  const [newFolderName, setNewFolderName] = useState('');
+  const [uploadQueue, setUploadQueue] = useState([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef(null);
 
   const openFolder = async (path) => {
     setCurrentView('fileManager');
@@ -191,6 +197,94 @@ function App() {
     }
   };
 
+  const handleMkdirSubmit = async (e) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    try {
+      const res = await fetch('/api/files/mkdir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: currentPath, folder_name: newFolderName.trim() })
+      });
+      if (res.ok) {
+        setActiveModal(null);
+        setNewFolderName('');
+        openFolder(currentPath);
+        fetchStats();
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Failed to create folder");
+      }
+    } catch (error) {
+      console.error("Error creating folder:", error);
+    }
+  };
+
+  const handleUploadFiles = async (files) => {
+    if (!files || files.length === 0) return;
+    setActiveModal('uploadCenter');
+    
+    const newItems = Array.from(files).map((f, idx) => ({
+      id: Date.now() + '-' + idx,
+      name: f.name,
+      size: f.size,
+      progress: 0,
+      status: 'pending',
+      file: f
+    }));
+    
+    setUploadQueue(prev => [...prev, ...newItems]);
+    
+    for (const item of newItems) {
+      await uploadSingleFile(item);
+    }
+    
+    openFolder(currentPath);
+    fetchStats();
+  };
+
+  const uploadSingleFile = (queueItem) => {
+    return new Promise((resolve) => {
+      const formData = new FormData();
+      formData.append('path', currentPath);
+      formData.append('file', queueItem.file);
+      
+      const xhr = new XMLHttpRequest();
+      
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          setUploadQueue(prev => prev.map(item => 
+            item.id === queueItem.id ? { ...item, progress: percent, status: percent === 100 ? 'processing' : 'uploading' } : item
+          ));
+        }
+      };
+      
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          setUploadQueue(prev => prev.map(item => 
+            item.id === queueItem.id ? { ...item, progress: 100, status: 'completed' } : item
+          ));
+        } else {
+          setUploadQueue(prev => prev.map(item => 
+            item.id === queueItem.id ? { ...item, status: 'error' } : item
+          ));
+        }
+        resolve();
+      };
+      
+      xhr.onerror = () => {
+        setUploadQueue(prev => prev.map(item => 
+          item.id === queueItem.id ? { ...item, status: 'error' } : item
+        ));
+        resolve();
+      };
+      
+      xhr.open('POST', '/api/files/upload', true);
+      xhr.send(formData);
+    });
+  };
+
   const formatSize = (bytes) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -262,11 +356,18 @@ function App() {
           
           <div className="header-actions">
             <div className="action-capsule">
-              <button className="btn-primary">
+              <input 
+                type="file" 
+                multiple 
+                ref={fileInputRef} 
+                style={{ display: 'none' }} 
+                onChange={(e) => handleUploadFiles(e.target.files)} 
+              />
+              <button className="btn-primary" onClick={() => { setActiveModal('uploadCenter'); }}>
                 <Upload size={18} />
                 Upload
               </button>
-              <button className="btn-secondary">
+              <button className="btn-secondary" onClick={() => setActiveModal('newFolder')}>
                 <Plus size={18} />
                 New Folder
               </button>
@@ -665,6 +766,94 @@ function App() {
               )}
             </div>
           </div>
+            </div>
+      )}
+
+      {/* New Folder Modal */}
+      {activeModal === 'newFolder' && (
+        <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
+          <div className="modal-content glass" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Create New Folder</h3>
+            <form onSubmit={handleMkdirSubmit}>
+              <input 
+                type="text" 
+                className="modal-input" 
+                value={newFolderName} 
+                onChange={(e) => setNewFolderName(e.target.value)}
+                autoFocus
+                placeholder="Enter folder name"
+                required
+              />
+              <div className="modal-footer">
+                <button type="button" className="btn-modal-secondary" onClick={() => setActiveModal(null)}>Cancel</button>
+                <button type="submit" className="btn-modal-primary">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Center Modal */}
+      {activeModal === 'uploadCenter' && (
+        <div className="modal-backdrop" onClick={() => { setUploadQueue([]); setActiveModal(null); }}>
+          <div className="modal-content glass upload-center" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 className="modal-title" style={{ margin: 0 }}>Upload Center</h3>
+              <button className="btn-icon close-btn" onClick={() => { setUploadQueue([]); setActiveModal(null); }}>
+                <Plus size={20} style={{ transform: 'rotate(45deg)' }} />
+              </button>
+            </div>
+            
+            <div 
+              className={`dropzone ${isDragging ? 'dragging' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleUploadFiles(e.dataTransfer.files); }}
+              onClick={() => fileInputRef.current.click()}
+            >
+              <CloudUpload size={48} className="dropzone-icon" />
+              <p className="dropzone-text">Drag & drop files here or <span className="browse-link">browse</span></p>
+              <p className="dropzone-sub">Supports uploading multiple files at once</p>
+            </div>
+            
+            {uploadQueue.length > 0 && (
+              <div className="upload-queue-container">
+                <h4 className="queue-title">Upload Progress ({uploadQueue.filter(i => i.status === 'completed').length}/{uploadQueue.length})</h4>
+                <div className="upload-queue-list">
+                  {uploadQueue.map(item => (
+                    <div key={item.id} className="queue-item">
+                      <div className="queue-item-info">
+                        <span className="queue-item-name" title={item.name}>{item.name}</span>
+                        <span className="queue-item-size">{formatSize(item.size)}</span>
+                      </div>
+                      <div className="queue-progress-row">
+                        <div className="queue-progress-track">
+                          <div className={`queue-progress-bar ${item.status}`} style={{ width: `${item.progress}%` }}></div>
+                        </div>
+                        <div className="queue-status-indicator">
+                          {item.status === 'pending' && <span className="status-badge pending">Pending</span>}
+                          {item.status === 'uploading' && <span className="status-badge uploading">{item.progress}%</span>}
+                          {item.status === 'processing' && <span className="status-badge processing"><Loader2 size={12} className="spin" /> Processing</span>}
+                          {item.status === 'completed' && <span className="status-badge completed"><Check size={12} /> Done</span>}
+                          {item.status === 'error' && <span className="status-badge error"><AlertCircle size={12} /> Error</span>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="modal-footer" style={{ marginTop: '24px' }}>
+              <button 
+                type="button" 
+                className="btn-modal-secondary" 
+                onClick={() => { setUploadQueue([]); setActiveModal(null); }}
+              >
+                Clear Queue & Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -672,3 +861,4 @@ function App() {
 }
 
 export default App;
+
