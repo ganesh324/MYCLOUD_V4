@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Home, Folder, Star, Share2, Search, Upload, Plus, 
-  Menu, MoreVertical, Image as ImageIcon, Video, Music, FileText, ChevronRight, ArrowLeft
+  Menu, MoreVertical, Image as ImageIcon, Video, Music, FileText, ChevronRight, ArrowLeft,
+  LayoutGrid, List, Trash2, Edit3
 } from 'lucide-react';
 import './App.css';
 
@@ -16,6 +17,10 @@ function App() {
   const [currentPath, setCurrentPath] = useState('/mnt/Drive1');
   const [folderContents, setFolderContents] = useState([]);
   const [loadingFolder, setLoadingFolder] = useState(false);
+  const [viewMode, setViewMode] = useState('grid');
+  const [activeModal, setActiveModal] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [renameInput, setRenameInput] = useState('');
 
   const openFolder = async (path) => {
     setCurrentView('fileManager');
@@ -75,10 +80,10 @@ function App() {
 
   const toggleFavorite = async (item, isFile = true) => {
     try {
-      // Optimistic update
-      if (isFile) {
-        setRecent(recent.map(r => r.path === item.path ? { ...r, is_favorite: !r.is_favorite } : r));
-      }
+      // Optimistic update for recent
+      setRecent(recent.map(r => r.path === item.path ? { ...r, is_favorite: !r.is_favorite } : r));
+      // Optimistic update for folderContents
+      setFolderContents(folderContents.map(f => f.path === item.path ? { ...f, is_favorite: !f.is_favorite } : f));
 
       const res = await fetch('/api/favorites/toggle', {
         method: 'POST',
@@ -100,8 +105,62 @@ function App() {
       }
     } catch (error) {
       console.error("Error toggling favorite:", error);
-      // Revert optimistic update on error by refetching
       fetchStats();
+      if (currentView === 'fileManager') openFolder(currentPath);
+    }
+  };
+
+  const handleRenameClick = (item) => {
+    setSelectedItem(item);
+    setRenameInput(item.name);
+    setActiveModal('rename');
+  };
+
+  const handleDeleteClick = (item) => {
+    setSelectedItem(item);
+    setActiveModal('delete');
+  };
+
+  const handleRenameSubmit = async (e) => {
+    e.preventDefault();
+    if (!renameInput.trim() || !selectedItem) return;
+    try {
+      const res = await fetch('/api/files/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: selectedItem.path, new_name: renameInput.trim() })
+      });
+      if (res.ok) {
+        setActiveModal(null);
+        openFolder(currentPath);
+        fetchStats();
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Failed to rename");
+      }
+    } catch (error) {
+      console.error("Error renaming:", error);
+    }
+  };
+
+  const handleDeleteSubmit = async () => {
+    if (!selectedItem) return;
+    try {
+      const res = await fetch('/api/files/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: selectedItem.path })
+      });
+      if (res.ok) {
+        setActiveModal(null);
+        openFolder(currentPath);
+        fetchStats();
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Failed to delete");
+      }
+    } catch (error) {
+      console.error("Error deleting:", error);
     }
   };
 
@@ -344,47 +403,166 @@ function App() {
                   </span>
                 ))}
               </div>
+              <div className="view-mode-toggle">
+                <button className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')}>
+                  <LayoutGrid size={18} />
+                </button>
+                <button className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')}>
+                  <List size={18} />
+                </button>
+              </div>
             </div>
             
             {loadingFolder ? (
               <div className="loading-state">Loading folder contents...</div>
             ) : (
-              <div className="fm-grid">
-                {folderContents.map((item, idx) => (
-                  <div 
-                    key={idx} 
-                    className="fm-item" 
-                    onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : null}
-                  >
-                    {item.type === 'Image' ? (
-                      <div className="fm-thumbnail-container">
-                        <img src={`/api/thumbnail?path=${encodeURIComponent(item.path)}`} alt={item.name} className="fm-thumbnail" loading="lazy" />
-                      </div>
-                    ) : (
-                      <div className="fm-icon-container">
-                        {item.type === 'Folder' ? (
-                          <Folder size={48} color="#3a7bd5" className="fm-icon" />
-                        ) : item.type === 'Video' ? (
-                          <Video size={48} color="#9b59b6" className="fm-icon" />
-                        ) : item.type === 'Music' ? (
-                          <Music size={48} color="#2ecc71" className="fm-icon" />
+              <>
+                {viewMode === 'grid' ? (
+                  <div className="fm-grid">
+                    {folderContents.map((item, idx) => (
+                      <div 
+                        key={idx} 
+                        className="fm-item grid-item" 
+                        onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : null}
+                      >
+                        <div className="fm-actions-overlay">
+                          <button className={`action-btn star ${item.is_favorite ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFavorite(item, false); }}>
+                            <Star size={14} />
+                          </button>
+                          <button className="action-btn edit" onClick={(e) => { e.stopPropagation(); handleRenameClick(item); }}>
+                            <Edit3 size={14} />
+                          </button>
+                          <button className="action-btn delete" onClick={(e) => { e.stopPropagation(); handleDeleteClick(item); }}>
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                        
+                        {item.type === 'Image' ? (
+                          <div className="fm-thumbnail-container">
+                            <img src={`/api/thumbnail?path=${encodeURIComponent(item.path)}`} alt={item.name} className="fm-thumbnail" loading="lazy" />
+                          </div>
                         ) : (
-                          <FileText size={48} color="#94a3b8" className="fm-icon" />
+                          <div className="fm-icon-container">
+                            {item.type === 'Folder' ? (
+                              <Folder size={48} color="#3a7bd5" className="fm-icon" />
+                            ) : item.type === 'Video' ? (
+                              <Video size={48} color="#9b59b6" className="fm-icon" />
+                            ) : item.type === 'Music' ? (
+                              <Music size={48} color="#2ecc71" className="fm-icon" />
+                            ) : (
+                              <FileText size={48} color="#94a3b8" className="fm-icon" />
+                            )}
+                          </div>
                         )}
+                        <div className="fm-item-name" title={item.name}>{item.name}</div>
                       </div>
-                    )}
-                    <div className="fm-item-name" title={item.name}>{item.name}</div>
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <div className="fm-list-view">
+                    <table className="fm-list-table">
+                      <thead>
+                        <tr>
+                          <th>NAME</th>
+                          <th>TYPE</th>
+                          <th>SIZE</th>
+                          <th>MODIFIED</th>
+                          <th style={{ textAlign: 'right' }}>ACTIONS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {folderContents.map((item, idx) => (
+                          <tr 
+                            key={idx} 
+                            className="fm-list-row"
+                            onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : null}
+                          >
+                            <td>
+                              <div className="fm-list-name-cell">
+                                {item.type === 'Image' ? (
+                                  <div className="fm-list-thumbnail-container">
+                                    <img src={`/api/thumbnail?path=${encodeURIComponent(item.path)}`} alt={item.name} className="fm-list-thumbnail" loading="lazy" />
+                                  </div>
+                                ) : item.type === 'Folder' ? (
+                                  <Folder size={20} color="#3a7bd5" />
+                                ) : item.type === 'Video' ? (
+                                  <Video size={20} color="#9b59b6" />
+                                ) : item.type === 'Music' ? (
+                                  <Music size={20} color="#2ecc71" />
+                                ) : (
+                                  <FileText size={20} color="#94a3b8" />
+                                )}
+                                <span className="fm-list-item-name" title={item.name}>{item.name}</span>
+                              </div>
+                            </td>
+                            <td>{item.type}</td>
+                            <td>{item.type === 'Folder' ? '--' : formatSize(item.size)}</td>
+                            <td>{new Date(item.modified).toLocaleDateString()}</td>
+                            <td>
+                              <div className="fm-list-actions">
+                                <button className={`action-btn star ${item.is_favorite ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFavorite(item, false); }}>
+                                  <Star size={14} />
+                                </button>
+                                <button className="action-btn edit" onClick={(e) => { e.stopPropagation(); handleRenameClick(item); }}>
+                                  <Edit3 size={14} />
+                                </button>
+                                <button className="action-btn delete" onClick={(e) => { e.stopPropagation(); handleDeleteClick(item); }}>
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
                 {folderContents.length === 0 && (
                   <div className="empty-state">This folder is empty</div>
                 )}
-              </div>
+              </>
             )}
           </div>
         )}
 
       </main>
+
+      {/* Rename Modal */}
+      {activeModal === 'rename' && selectedItem && (
+        <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
+          <div className="modal-content glass" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Rename {selectedItem.type}</h3>
+            <form onSubmit={handleRenameSubmit}>
+              <input 
+                type="text" 
+                className="modal-input" 
+                value={renameInput} 
+                onChange={(e) => setRenameInput(e.target.value)}
+                autoFocus
+                placeholder="Enter new name"
+              />
+              <div className="modal-footer">
+                <button type="button" className="btn-modal-secondary" onClick={() => setActiveModal(null)}>Cancel</button>
+                <button type="submit" className="btn-modal-primary">Rename</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Modal */}
+      {activeModal === 'delete' && selectedItem && (
+        <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
+          <div className="modal-content glass delete" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Confirm Deletion</h3>
+            <p className="modal-text">Are you sure you want to delete the {selectedItem.type.toLowerCase()} <strong>{selectedItem.name}</strong>? This action cannot be undone.</p>
+            <div className="modal-footer">
+              <button type="button" className="btn-modal-secondary" onClick={() => setActiveModal(null)}>Cancel</button>
+              <button type="button" className="btn-modal-danger" onClick={handleDeleteSubmit}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

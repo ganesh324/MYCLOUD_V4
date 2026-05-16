@@ -8,6 +8,7 @@ import aiosqlite
 import hashlib
 from fastapi.responses import FileResponse
 from PIL import Image
+import shutil
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "stats.db")
 
@@ -169,6 +170,12 @@ async def get_files_list(path: str = "/mnt/Drive1"):
     if not os.path.exists(path) or not os.path.isdir(path):
         raise HTTPException(status_code=404, detail="Directory not found")
 
+    # Fetch favorites to quickly determine favorite status
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('SELECT path FROM favorites')
+        rows = await cursor.fetchall()
+        favorites = {row[0] for row in rows}
+
     items = []
     try:
         with os.scandir(path) as it:
@@ -196,7 +203,8 @@ async def get_files_list(path: str = "/mnt/Drive1"):
                         "path": entry_path,
                         "type": item_type,
                         "size": stat.st_size,
-                        "modified": stat.st_mtime * 1000
+                        "modified": stat.st_mtime * 1000,
+                        "is_favorite": entry_path in favorites
                     })
                 except OSError:
                     pass
@@ -234,6 +242,85 @@ async def get_thumbnail(path: str):
             raise HTTPException(status_code=500, detail="Error generating thumbnail")
             
     return FileResponse(thumb_path)
+
+class RenameRequest(BaseModel):
+    path: str
+    new_name: str
+
+class DeleteRequest(BaseModel):
+    path: str
+
+@app.post("/api/files/rename")
+async def rename_file(req: RenameRequest):
+    old_path = req.path
+    if not os.path.abspath(old_path).startswith("/mnt/Drive1"):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if not os.path.exists(old_path):
+        raise HTTPException(status_code=404, detail="File or folder not found")
+        
+    if not req.new_name or "/" in req.new_name or "\\" in req.new_name:
+        raise HTTPException(status_code=400, detail="Invalid new name")
+        
+    parent_dir = os.path.dirname(old_path)
+    new_path = os.path.join(parent_dir, req.new_name)
+    
+    if os.path.exists(new_path):
+        raise HTTPException(status_code=400, detail="A file or folder with this name already exists")
+        
+    try:
+        os.rename(old_path, new_path)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to rename on disk: {str(e)}")
+        
+    # Update DB references
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Update favorites
+        await db.execute('UPDATE favorites SET path = ?, name = ? WHERE path = ?', (new_path, req.new_name, old_path))
+        # Update sub-favorites
+        await db.execute(
+            'UPDATE favorites SET path = ? || substr(path, ?) WHERE path LIKE ?',
+            (new_path, len(old_path) + 1, old_path + '/%')
+        )
+        
+        # Update files index
+        await db.execute('UPDATE files SET filepath = ?, filename = ? WHERE filepath = ?', (new_path, req.new_name, old_path))
+        # Update sub-files
+        await db.execute(
+            'UPDATE files SET filepath = ? || substr(filepath, ?) WHERE filepath LIKE ?',
+            (new_path, len(old_path) + 1, old_path + '/%')
+        )
+        
+        await db.commit()
+        
+    return {"status": "success", "new_path": new_path}
+
+@app.post("/api/files/delete")
+async def delete_file(req: DeleteRequest):
+    path = req.path
+    if not os.path.abspath(path).startswith("/mnt/Drive1"):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File or folder not found")
+        
+    try:
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete on disk: {str(e)}")
+        
+    # Update DB references
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Delete from favorites
+        await db.execute('DELETE FROM favorites WHERE path = ? OR path LIKE ?', (path, path + '/%'))
+        # Delete from files index
+        await db.execute('DELETE FROM files WHERE filepath = ? OR filepath LIKE ?', (path, path + '/%'))
+        await db.commit()
+        
+    return {"status": "success"}
 
 if __name__ == "__main__":
     import uvicorn
