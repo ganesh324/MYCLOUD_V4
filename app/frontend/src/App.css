@@ -94,7 +94,8 @@
   background-color: #f3f6fa;
   padding: 10px 20px;
   border-radius: 24px;
-  width: 400px;
+  flex: 1;
+  margin-right: 40px;
 }
 
 .search-bar input {
@@ -112,11 +113,16 @@
   gap: 16px;
 }
 
+.action-capsule {
+  display: flex;
+  align-items: center;
+}
+
 .btn-primary {
   background-color: var(--primary);
   color: white;
   padding: 10px 20px;
-  border-radius: 20px;
+  border-radius: 20px 0 0 20px;
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -132,7 +138,7 @@
   background-color: #2b3240;
   color: white;
   padding: 10px 20px;
-  border-radius: 20px;
+  border-radius: 0 20px 20px 0;
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -286,3 +292,204 @@
   padding: 40px !important;
   color: var(--text-muted) !important;
 }
+
+/* Favorites Section */
+.favorites-grid {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 32px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.favorite-folder-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background-color: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  min-width: 200px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.favorite-folder-card:hover {
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
+  transform: translateY(-2px);
+}
+
+.favorite-folder-icon {
+  color: var(--card-teal); /* or any distinct color */
+}
+
+.favorite-folder-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.favorite-folder-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-main);
+}
+
+.favorite-folder-type {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Star Toggle */
+.star-toggle {
+  color: #cbd5e1;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.star-toggle:hover {
+  color: #fbbf24;
+  transform: scale(1.1);
+}
+
+.star-toggle.active {
+  color: #fbbf24;
+  fill: #fbbf24;
+}
+
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* File Manager View */
+.file-manager-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  background: #f8fafc;
+  padding: 12px 16px;
+  border-radius: 12px;
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+
+.btn-icon:hover {
+  background: #e2e8f0;
+  color: var(--text-main);
+}
+
+.path-text {
+  display: flex;
+  align-items: center;
+  font-weight: 500;
+  color: var(--text-main);
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.breadcrumb-part {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-main);
+}
+
+.breadcrumb-part:last-child {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.fm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 20px;
+  padding: 10px;
+}
+
+.fm-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.fm-item:hover {
+  background-color: #f8fafc;
+  border-color: #e2e8f0;
+  transform: translateY(-2px);
+}
+
+.fm-thumbnail-container {
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f5f9;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.fm-thumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fm-icon-container {
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.fm-item-name {
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-main);
+  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.loading-state {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
