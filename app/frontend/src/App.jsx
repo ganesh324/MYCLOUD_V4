@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Home, Folder, Star, Share2, Search, Upload, Plus, 
   Menu, MoreVertical, Image as ImageIcon, Video, Music, FileText, ChevronRight, ChevronLeft, ArrowLeft,
@@ -14,11 +14,17 @@ window.fetch = async (url, options = {}) => {
   if (token) {
     options.headers = {
       ...options.headers,
-      "Authorization": `Bearer ${token}`,
-      ...options.headers
+      "Authorization": `Bearer ${token}`
     };
   }
   return originalFetch(url, options);
+};
+
+const authUrl = (endpoint, path) => {
+  const params = new URLSearchParams({ path });
+  const token = localStorage.getItem("mycloud_token");
+  if (token) params.set("token", token);
+  return `${endpoint}?${params.toString()}`;
 };
 
 function App() {
@@ -64,30 +70,7 @@ function App() {
   const [loadingCategory, setLoadingCategory] = useState(false);
   
   const [selectedPaths, setSelectedPaths] = useState([]);
-  const [swipedRecentIndex, setSwipedRecentIndex] = useState(null);
   const [mobileActiveItem, setMobileActiveItem] = useState(null);
-  const touchStartX = useRef(0);
-  const touchCurrentX = useRef(0);
-
-  const handleTouchStart = (e) => {
-    touchStartX.current = e.touches[0].clientX;
-    touchCurrentX.current = e.touches[0].clientX;
-  };
-
-  const handleTouchMove = (e) => {
-    touchCurrentX.current = e.touches[0].clientX;
-  };
-
-  const handleTouchEnd = (index) => {
-    const diff = touchCurrentX.current - touchStartX.current;
-    if (diff < -50) {
-      setSwipedRecentIndex(index);
-    } else if (diff > 50) {
-      if (swipedRecentIndex === index) {
-        setSwipedRecentIndex(null);
-      }
-    }
-  };
 
   const openFolder = async (path) => {
     setCurrentView('fileManager');
@@ -184,7 +167,7 @@ function App() {
     setCurrentView('dashboard');
   };
 
-  const toggleFavorite = async (item, isFile = true) => {
+  const toggleFavorite = async (item) => {
     try {
       // Optimistic update for recent
       setRecent(recent.map(r => r.path === item.path ? { ...r, is_favorite: !r.is_favorite } : r));
@@ -376,6 +359,8 @@ function App() {
       };
       
       xhr.open('POST', '/api/files/upload', true);
+      const token = localStorage.getItem("mycloud_token");
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       xhr.send(formData);
     });
   };
@@ -411,6 +396,11 @@ function App() {
     } finally {
       setLoadingCategory(false);
     }
+  };
+
+  const handleItemContextMenu = (e, item) => {
+    e.preventDefault();
+    setMobileActiveItem(item);
   };
 
   const toggleSelectItem = (path, e) => {
@@ -456,7 +446,7 @@ function App() {
       });
       if (res.ok) {
         setSelectedPaths([]);
-        fetchFavorites();
+        fetchStats();
         openFolder(currentPath);
       } else {
         alert("Failed to star selected items");
@@ -820,7 +810,7 @@ function App() {
                   >
                     <div className="masonry-thumb-container">
                       <img 
-                        src={`/api/files/raw?path=${encodeURIComponent(item.path)}`} 
+                        src={authUrl('/api/files/raw', item.path)} 
                         alt={item.name} 
                         className="masonry-img" 
                         loading="lazy"
@@ -860,7 +850,7 @@ function App() {
           </div>
         ) : currentView === 'dashboard' ? (
           <>
-            <div className="section-header">
+            <div className="section-header mobile-storage-header">
               <span>STORAGE OVERVIEW</span>
               <div className="live-stats" onClick={fetchStats}>
                 <div className="live-stats-dot"></div>
@@ -925,7 +915,7 @@ function App() {
               </div>
             </div>
 
-        <div className="section-header" style={{ marginTop: '20px' }}>
+        <div className="section-header mobile-favorites-header" style={{ marginTop: '20px' }}>
           <span>FAVORITE FOLDERS</span>
         </div>
         
@@ -950,7 +940,7 @@ function App() {
           </div>
         )}
 
-        <div className="section-header">
+        <div className="section-header mobile-recent-header">
           <span>RECENT ACTIVITY</span>
           <div className="recent-view-toggle desktop-only" style={{ display: 'flex', alignItems: 'center' }}>
             <button 
@@ -1125,7 +1115,7 @@ function App() {
                         
                         {item.type === 'Image' ? (
                           <div className="fm-thumbnail-container">
-                            <img src={`/api/thumbnail?path=${encodeURIComponent(item.path)}`} alt={item.name} className="fm-thumbnail" loading="lazy" />
+                            <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="fm-thumbnail" loading="lazy" />
                           </div>
                         ) : (
                           <div className="fm-icon-container">
@@ -1183,7 +1173,7 @@ function App() {
                               <div className="fm-list-name-cell">
                                 {item.type === 'Image' ? (
                                   <div className="fm-list-thumbnail-container">
-                                    <img src={`/api/thumbnail?path=${encodeURIComponent(item.path)}`} alt={item.name} className="fm-list-thumbnail" loading="lazy" />
+                                    <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="fm-list-thumbnail" loading="lazy" />
                                   </div>
                                 ) : item.type === 'Folder' ? (
                                   <Folder size={20} color="#3a7bd5" />
@@ -1285,7 +1275,7 @@ function App() {
               </div>
               <div className="preview-actions">
                 <a 
-                  href={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} 
+                  href={authUrl('/api/files/raw', previewItem.path)} 
                   download={previewItem.name} 
                   className="btn-modal-primary"
                   style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', fontSize: '0.85rem' }}
@@ -1300,11 +1290,11 @@ function App() {
             <div className="preview-body">
               {previewItem.type === 'Image' ? (
                 <div className="preview-media-container">
-                  <img src={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} alt={previewItem.name} className="preview-image" />
+                  <img src={authUrl('/api/files/raw', previewItem.path)} alt={previewItem.name} className="preview-image" />
                 </div>
               ) : previewItem.type === 'PDF' ? (
                 <iframe 
-                  src={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} 
+                  src={authUrl('/api/files/raw', previewItem.path)} 
                   width="100%" 
                   height="100%" 
                   style={{ border: 'none', borderRadius: '12px' }} 
@@ -1322,14 +1312,14 @@ function App() {
                 </div>
               ) : previewItem.type === 'Video' ? (
                 <div className="preview-media-container">
-                  <video src={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} controls className="preview-video" autoPlay />
+                  <video src={authUrl('/api/files/raw', previewItem.path)} controls className="preview-video" autoPlay />
                 </div>
               ) : previewItem.type === 'Music' ? (
                 <div className="preview-media-container music">
                   <div className="music-preview-card">
                     <Music size={64} color="var(--primary)" />
                     <span className="music-filename">{previewItem.name}</span>
-                    <audio src={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} controls autoPlay />
+                    <audio src={authUrl('/api/files/raw', previewItem.path)} controls autoPlay />
                   </div>
                 </div>
               ) : (
@@ -1337,7 +1327,7 @@ function App() {
                   <FileText size={64} color="var(--text-muted)" />
                   <p>Previews are not supported for this file type.</p>
                   <a 
-                    href={`/api/files/raw?path=${encodeURIComponent(previewItem.path)}`} 
+                    href={authUrl('/api/files/raw', previewItem.path)} 
                     download={previewItem.name} 
                     className="btn-modal-primary"
                     style={{ textDecoration: 'none' }}
@@ -1541,7 +1531,7 @@ function App() {
               {mobileActiveItem.type !== 'Folder' && (
                 <a 
                   className="mobile-sheet-action-btn"
-                  href={`/api/files/download?path=${encodeURIComponent(mobileActiveItem.path)}`}
+                  href={authUrl('/api/files/raw', mobileActiveItem.path)}
                   onClick={() => setMobileActiveItem(null)}
                 >
                   <Download size={16} color="#64748b" />

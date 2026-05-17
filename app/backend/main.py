@@ -1,7 +1,7 @@
 import os
 import sqlite3
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import aiosqlite
@@ -20,7 +20,8 @@ import secrets
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "stats.db")
-SECRET_KEY = "mycloud_super_secure_secret_key_change_me_in_production"
+STORAGE_ROOT = os.path.realpath(os.environ.get("MYCLOUD_STORAGE_ROOT", "/mnt/Drive1"))
+SECRET_KEY = os.environ.get("MYCLOUD_SECRET_KEY", "mycloud_dev_secret_change_me")
 
 def hash_password(password: str, salt: str = None) -> tuple[str, str]:
     if not salt:
@@ -60,14 +61,34 @@ def verify_token(token: str) -> dict | None:
     except Exception:
         return None
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    token = credentials.credentials
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    token: str | None = Query(default=None)
+) -> dict:
+    token = credentials.credentials if credentials else token
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing session token")
     user = verify_token(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired session token")
     return user
+
+def resolve_storage_path(path: str) -> str:
+    resolved = os.path.realpath(path)
+    try:
+        is_inside_root = os.path.commonpath([STORAGE_ROOT, resolved]) == STORAGE_ROOT
+    except ValueError:
+        is_inside_root = False
+    if not is_inside_root:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return resolved
+
+def safe_child_path(parent: str, name: str) -> str:
+    if not name or os.path.basename(name) != name or "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail="Invalid file or folder name")
+    return resolve_storage_path(os.path.join(parent, name))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -297,9 +318,8 @@ async def get_recent_activity(user: dict = Depends(get_current_user)):
     return {"recent": recent}
 
 @app.get("/api/files/list")
-async def get_files_list(path: str = "/mnt/Drive1", user: dict = Depends(get_current_user)):
-    if not os.path.abspath(path).startswith("/mnt/Drive1"):
-        raise HTTPException(status_code=403, detail="Access denied")
+async def get_files_list(path: str = STORAGE_ROOT, user: dict = Depends(get_current_user)):
+    path = resolve_storage_path(path)
     
     if not os.path.exists(path) or not os.path.isdir(path):
         raise HTTPException(status_code=404, detail="Directory not found")
@@ -354,8 +374,7 @@ async def get_files_list(path: str = "/mnt/Drive1", user: dict = Depends(get_cur
 
 @app.get("/api/thumbnail")
 async def get_thumbnail(path: str, user: dict = Depends(get_current_user)):
-    if not os.path.abspath(path).startswith("/mnt/Drive1"):
-        raise HTTPException(status_code=403, detail="Access denied")
+    path = resolve_storage_path(path)
         
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File not found")
@@ -390,18 +409,13 @@ class DeleteRequest(BaseModel):
 
 @app.post("/api/files/rename")
 async def rename_file(req: RenameRequest, user: dict = Depends(get_current_user)):
-    old_path = req.path
-    if not os.path.abspath(old_path).startswith("/mnt/Drive1"):
-        raise HTTPException(status_code=403, detail="Access denied")
+    old_path = resolve_storage_path(req.path)
         
     if not os.path.exists(old_path):
         raise HTTPException(status_code=404, detail="File or folder not found")
         
-    if not req.new_name or "/" in req.new_name or "\\" in req.new_name:
-        raise HTTPException(status_code=400, detail="Invalid new name")
-        
     parent_dir = os.path.dirname(old_path)
-    new_path = os.path.join(parent_dir, req.new_name)
+    new_path = safe_child_path(parent_dir, req.new_name)
     
     if os.path.exists(new_path):
         raise HTTPException(status_code=400, detail="A file or folder with this name already exists")
@@ -435,9 +449,7 @@ async def rename_file(req: RenameRequest, user: dict = Depends(get_current_user)
 
 @app.post("/api/files/delete")
 async def delete_file(req: DeleteRequest, user: dict = Depends(get_current_user)):
-    path = req.path
-    if not os.path.abspath(path).startswith("/mnt/Drive1"):
-        raise HTTPException(status_code=403, detail="Access denied")
+    path = resolve_storage_path(req.path)
         
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File or folder not found")
@@ -462,8 +474,7 @@ async def delete_file(req: DeleteRequest, user: dict = Depends(get_current_user)
 
 @app.get("/api/files/raw")
 async def get_raw_file(path: str, user: dict = Depends(get_current_user)):
-    if not os.path.abspath(path).startswith("/mnt/Drive1"):
-        raise HTTPException(status_code=403, detail="Access denied")
+    path = resolve_storage_path(path)
         
     if not os.path.exists(path) or os.path.isdir(path):
         raise HTTPException(status_code=404, detail="File not found")
@@ -472,8 +483,7 @@ async def get_raw_file(path: str, user: dict = Depends(get_current_user)):
 
 @app.get("/api/files/text")
 async def get_text_file(path: str, user: dict = Depends(get_current_user)):
-    if not os.path.abspath(path).startswith("/mnt/Drive1"):
-        raise HTTPException(status_code=403, detail="Access denied")
+    path = resolve_storage_path(path)
         
     if not os.path.exists(path) or os.path.isdir(path):
         raise HTTPException(status_code=404, detail="File not found")
@@ -487,13 +497,8 @@ async def get_text_file(path: str, user: dict = Depends(get_current_user)):
 
 @app.post("/api/files/mkdir")
 async def create_directory(req: MkdirRequest, user: dict = Depends(get_current_user)):
-    if not os.path.abspath(req.path).startswith("/mnt/Drive1"):
-        raise HTTPException(status_code=403, detail="Access denied")
-        
-    target_dir = os.path.join(req.path, req.folder_name)
-    
-    if not req.folder_name or "/" in req.folder_name or "\\" in req.folder_name:
-        raise HTTPException(status_code=400, detail="Invalid folder name")
+    parent_dir = resolve_storage_path(req.path)
+    target_dir = safe_child_path(parent_dir, req.folder_name)
         
     if os.path.exists(target_dir):
         raise HTTPException(status_code=400, detail="Folder already exists")
@@ -506,13 +511,13 @@ async def create_directory(req: MkdirRequest, user: dict = Depends(get_current_u
 
 @app.post("/api/files/upload")
 async def upload_file(path: str = Form(...), file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-    if not os.path.abspath(path).startswith("/mnt/Drive1"):
-        raise HTTPException(status_code=403, detail="Access denied")
+    path = resolve_storage_path(path)
         
     if not os.path.exists(path) or not os.path.isdir(path):
         raise HTTPException(status_code=400, detail="Target path is not a directory")
         
-    target_filepath = os.path.join(path, file.filename)
+    safe_filename = os.path.basename(file.filename or "")
+    target_filepath = safe_child_path(path, safe_filename)
     
     try:
         with open(target_filepath, "wb") as buffer:
@@ -521,13 +526,13 @@ async def upload_file(path: str = Form(...), file: UploadFile = File(...), user:
         stat_info = os.stat(target_filepath)
         size = stat_info.st_size
         mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        ext = os.path.splitext(file.filename)[1].lower().replace(".", "")
+        ext = os.path.splitext(safe_filename)[1].lower().replace(".", "")
         
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('''
                 INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (file.filename, target_filepath, ext, size, mod_time))
+            ''', (safe_filename, target_filepath, ext, size, mod_time))
             await db.commit()
             
         return {"status": "success", "filepath": target_filepath}
@@ -641,6 +646,10 @@ async def get_files_by_category(category: str, user: dict = Depends(get_current_
 async def bulk_favorite(req: BulkFavoriteRequest, user: dict = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         for item in req.items:
+            try:
+                item.path = resolve_storage_path(item.path)
+            except HTTPException:
+                continue
             await db.execute('''
                 INSERT OR REPLACE INTO favorites (path, type, name) 
                 VALUES (?, ?, ?)
@@ -653,7 +662,9 @@ async def bulk_delete(req: BulkDeleteRequest, user: dict = Depends(get_current_u
     async with aiosqlite.connect(DB_PATH) as db:
         deleted_count = 0
         for path in req.paths:
-            if not os.path.abspath(path).startswith("/mnt/Drive1"):
+            try:
+                path = resolve_storage_path(path)
+            except HTTPException:
                 continue
             if os.path.exists(path):
                 try:
@@ -677,7 +688,9 @@ async def bulk_download(req: BulkDeleteRequest, user: dict = Depends(get_current
     
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for path in req.paths:
-            if not os.path.abspath(path).startswith("/mnt/Drive1"):
+            try:
+                path = resolve_storage_path(path)
+            except HTTPException:
                 continue
             if os.path.exists(path):
                 if os.path.isdir(path):

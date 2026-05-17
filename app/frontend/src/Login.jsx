@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { User, Lock, Shield, Eye, EyeOff, Loader2, ArrowRight } from 'lucide-react';
 
 function Login({ onLoginSuccess }) {
