@@ -508,6 +508,8 @@ function App() {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
+  const favoriteFolders = favorites.filter(f => f.type === 'Folder');
+
   return (
     <div className="dashboard">
       {/* Sidebar */}
