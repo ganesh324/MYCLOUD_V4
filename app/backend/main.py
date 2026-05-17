@@ -1,7 +1,7 @@
 import os
 import sqlite3
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import aiosqlite
@@ -12,15 +12,67 @@ import shutil
 from datetime import datetime
 import io
 import zipfile
+import hmac
+import base64
+import json
+import time
+import secrets
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "stats.db")
+SECRET_KEY = "mycloud_super_secure_secret_key_change_me_in_production"
+
+def hash_password(password: str, salt: str = None) -> tuple[str, str]:
+    if not salt:
+        salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
+    return dk.hex(), salt
+
+def generate_token(username: str, role: str, display_name: str) -> str:
+    payload = {
+        "username": username,
+        "role": role,
+        "display_name": display_name,
+        "exp": time.time() + 7 * 24 * 3600
+    }
+    payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    signature = hmac.new(SECRET_KEY.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{signature}"
+
+def verify_token(token: str) -> dict | None:
+    try:
+        parts = token.split(".")
+        if len(parts) != 2:
+            return None
+        payload_b64, signature = parts
+        padding = '=' * (4 - len(payload_b64) % 4)
+        payload_json = base64.urlsafe_b64decode(payload_b64 + padding).decode()
+        payload = json.loads(payload_json)
+        
+        expected_sig = hmac.new(SECRET_KEY.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_sig, signature):
+            return None
+            
+        if time.time() > payload.get("exp", 0):
+            return None
+            
+        return payload
+    except Exception:
+        return None
+
+security = HTTPBearer()
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    token = credentials.credentials
+    user = verify_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired session token")
+    return user
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure thumbnails directory exists
     os.makedirs(os.path.join(os.path.dirname(__file__), "..", "data", "thumbnails"), exist_ok=True)
     
-    # Initialize the favorites table on startup
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('''
             CREATE TABLE IF NOT EXISTS favorites (
@@ -30,7 +82,34 @@ async def lifespan(app: FastAPI):
             )
         ''')
         
-        # Seed default Drive1 favorite if not present
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                role TEXT NOT NULL,
+                display_name TEXT NOT NULL
+            )
+        ''')
+        
+        cursor = await db.execute("SELECT COUNT(*) FROM users")
+        row = await cursor.fetchone()
+        if row and row[0] == 0:
+            users_to_seed = [
+                ("ganesh_admin", "Hello324", "admin", "Ganesh (Admin)"),
+                ("ganesh", "Hello324", "user", "Ganesh Eeti"),
+                ("haritha", "Hello0611", "user", "Haritha Kothuri")
+            ]
+            for username, password, role, display_name in users_to_seed:
+                hashed, salt = hash_password(password)
+                await db.execute('''
+                    INSERT INTO users (username, password_hash, salt, role, display_name)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (username, hashed, salt, role, display_name))
+            await db.commit()
+            print("Successfully seeded 3 default accounts in MyCloud database!")
+        
         await db.execute('''
             INSERT OR IGNORE INTO favorites (path, type, name) 
             VALUES ('/mnt/Drive1', 'Folder', 'Drive1')
@@ -74,8 +153,38 @@ class BulkFavoriteRequest(BaseModel):
 class BulkDeleteRequest(BaseModel):
     paths: list[str]
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        cursor = await db.execute("SELECT password_hash, salt, role, display_name FROM users WHERE username = ?", (req.username,))
+        user = await cursor.fetchone()
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+            
+        hashed, _ = hash_password(req.password, user["salt"])
+        if hashed != user["password_hash"]:
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+            
+        token = generate_token(req.username, user["role"], user["display_name"])
+        return {
+            "token": token,
+            "username": req.username,
+            "role": user["role"],
+            "display_name": user["display_name"]
+        }
+
+@app.get("/api/auth/me")
+async def get_me(user: dict = Depends(get_current_user)):
+    return user
+
 @app.get("/api/stats")
-async def get_stats():
+async def get_stats(user: dict = Depends(get_current_user)):
     stats = {
         "images": 0,
         "videos": 0,
@@ -121,7 +230,7 @@ async def get_stats():
     return stats
 
 @app.get("/api/favorites")
-async def get_favorites():
+async def get_favorites(user: dict = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
         cursor = await db.execute('SELECT path, type, name FROM favorites')
@@ -130,7 +239,7 @@ async def get_favorites():
     return {"favorites": favorites}
 
 @app.post("/api/favorites/toggle")
-async def toggle_favorite(req: FavoriteToggleRequest):
+async def toggle_favorite(req: FavoriteToggleRequest, user: dict = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
         cursor = await db.execute('SELECT path FROM favorites WHERE path = ?', (req.path,))
@@ -147,7 +256,7 @@ async def toggle_favorite(req: FavoriteToggleRequest):
     return {"status": status, "path": req.path}
 
 @app.get("/api/recent")
-async def get_recent_activity():
+async def get_recent_activity(user: dict = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
         
@@ -188,7 +297,7 @@ async def get_recent_activity():
     return {"recent": recent}
 
 @app.get("/api/files/list")
-async def get_files_list(path: str = "/mnt/Drive1"):
+async def get_files_list(path: str = "/mnt/Drive1", user: dict = Depends(get_current_user)):
     if not os.path.abspath(path).startswith("/mnt/Drive1"):
         raise HTTPException(status_code=403, detail="Access denied")
     
@@ -244,7 +353,7 @@ async def get_files_list(path: str = "/mnt/Drive1"):
     return {"items": items}
 
 @app.get("/api/thumbnail")
-async def get_thumbnail(path: str):
+async def get_thumbnail(path: str, user: dict = Depends(get_current_user)):
     if not os.path.abspath(path).startswith("/mnt/Drive1"):
         raise HTTPException(status_code=403, detail="Access denied")
         
@@ -280,7 +389,7 @@ class DeleteRequest(BaseModel):
     path: str
 
 @app.post("/api/files/rename")
-async def rename_file(req: RenameRequest):
+async def rename_file(req: RenameRequest, user: dict = Depends(get_current_user)):
     old_path = req.path
     if not os.path.abspath(old_path).startswith("/mnt/Drive1"):
         raise HTTPException(status_code=403, detail="Access denied")
@@ -325,7 +434,7 @@ async def rename_file(req: RenameRequest):
     return {"status": "success", "new_path": new_path}
 
 @app.post("/api/files/delete")
-async def delete_file(req: DeleteRequest):
+async def delete_file(req: DeleteRequest, user: dict = Depends(get_current_user)):
     path = req.path
     if not os.path.abspath(path).startswith("/mnt/Drive1"):
         raise HTTPException(status_code=403, detail="Access denied")
@@ -352,7 +461,7 @@ async def delete_file(req: DeleteRequest):
     return {"status": "success"}
 
 @app.get("/api/files/raw")
-async def get_raw_file(path: str):
+async def get_raw_file(path: str, user: dict = Depends(get_current_user)):
     if not os.path.abspath(path).startswith("/mnt/Drive1"):
         raise HTTPException(status_code=403, detail="Access denied")
         
@@ -362,7 +471,7 @@ async def get_raw_file(path: str):
     return FileResponse(path)
 
 @app.get("/api/files/text")
-async def get_text_file(path: str):
+async def get_text_file(path: str, user: dict = Depends(get_current_user)):
     if not os.path.abspath(path).startswith("/mnt/Drive1"):
         raise HTTPException(status_code=403, detail="Access denied")
         
@@ -377,7 +486,7 @@ async def get_text_file(path: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/files/mkdir")
-async def create_directory(req: MkdirRequest):
+async def create_directory(req: MkdirRequest, user: dict = Depends(get_current_user)):
     if not os.path.abspath(req.path).startswith("/mnt/Drive1"):
         raise HTTPException(status_code=403, detail="Access denied")
         
@@ -396,7 +505,7 @@ async def create_directory(req: MkdirRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/files/upload")
-async def upload_file(path: str = Form(...), file: UploadFile = File(...)):
+async def upload_file(path: str = Form(...), file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     if not os.path.abspath(path).startswith("/mnt/Drive1"):
         raise HTTPException(status_code=403, detail="Access denied")
         
@@ -426,7 +535,7 @@ async def upload_file(path: str = Form(...), file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/files/search")
-async def search_files(q: str = ""):
+async def search_files(q: str = "", user: dict = Depends(get_current_user)):
     if not q:
         return []
     async with aiosqlite.connect(DB_PATH) as db:
@@ -467,7 +576,7 @@ async def search_files(q: str = ""):
         return results
 
 @app.get("/api/files/category")
-async def get_files_by_category(category: str):
+async def get_files_by_category(category: str, user: dict = Depends(get_current_user)):
     ext_filter = None
     exclude_others = False
     
@@ -529,7 +638,7 @@ async def get_files_by_category(category: str):
         return results
 
 @app.post("/api/files/bulk-favorite")
-async def bulk_favorite(req: BulkFavoriteRequest):
+async def bulk_favorite(req: BulkFavoriteRequest, user: dict = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         for item in req.items:
             await db.execute('''
@@ -540,7 +649,7 @@ async def bulk_favorite(req: BulkFavoriteRequest):
     return {"status": "success", "count": len(req.items)}
 
 @app.post("/api/files/bulk-delete")
-async def bulk_delete(req: BulkDeleteRequest):
+async def bulk_delete(req: BulkDeleteRequest, user: dict = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         deleted_count = 0
         for path in req.paths:
@@ -563,7 +672,7 @@ async def bulk_delete(req: BulkDeleteRequest):
     return {"status": "success", "count": deleted_count}
 
 @app.post("/api/files/bulk-download")
-async def bulk_download(req: BulkDeleteRequest):
+async def bulk_download(req: BulkDeleteRequest, user: dict = Depends(get_current_user)):
     zip_buffer = io.BytesIO()
     
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:

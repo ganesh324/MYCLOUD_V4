@@ -5,8 +5,26 @@ import {
   LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, AlertCircle, Loader2, Download
 } from 'lucide-react';
 import './App.css';
+import Login from './Login';
+
+// Setup global fetch interceptor for MyCloud session tokens
+const originalFetch = window.fetch;
+window.fetch = async (url, options = {}) => {
+  const token = localStorage.getItem("mycloud_token");
+  if (token) {
+    options.headers = {
+      ...options.headers,
+      "Authorization": `Bearer ${token}`,
+      ...options.headers
+    };
+  }
+  return originalFetch(url, options);
+};
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
   const [stats, setStats] = useState({
     images: 0, videos: 0, music: 0, files: 0, folders: 0, total_size: 0
   });
@@ -97,8 +115,47 @@ function App() {
   };
 
   useEffect(() => {
-    fetchStats();
+    const checkAuth = async () => {
+      const token = localStorage.getItem("mycloud_token");
+      if (token) {
+        try {
+          const res = await fetch('/api/auth/me');
+          if (res.ok) {
+            const userData = await res.json();
+            setUser(userData);
+            fetchStats();
+          } else {
+            localStorage.removeItem("mycloud_token");
+            setUser(null);
+          }
+        } catch (error) {
+          console.error("Auth validation failed:", error);
+          localStorage.removeItem("mycloud_token");
+          setUser(null);
+        }
+      }
+      setAuthChecked(true);
+    };
+    
+    checkAuth();
   }, []);
+
+  const handleLoginSuccess = (loginData) => {
+    localStorage.setItem("mycloud_token", loginData.token);
+    setUser({
+      username: loginData.username,
+      role: loginData.role,
+      display_name: loginData.display_name
+    });
+    fetchStats();
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("mycloud_token");
+    setUser(null);
+    setActiveModal(null);
+    setCurrentView('dashboard');
+  };
 
   const toggleFavorite = async (item, isFile = true) => {
     try {
@@ -438,7 +495,18 @@ function App() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const favoriteFolders = favorites.filter(f => f.type === 'Folder');
+  if (!authChecked) {
+    return (
+      <div className="login-screen" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'radial-gradient(circle at 10% 20%, rgba(26, 32, 44, 1) 0%, rgba(13, 17, 23, 1) 90%)', color: 'white' }}>
+        <Loader2 className="animate-spin" size={48} color="#3a7bd5" />
+        <p style={{ marginTop: '16px', color: '#94a3b8', fontSize: '0.9rem', letterSpacing: '0.05em' }}>Securing MyCloud session...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div className="dashboard">
@@ -631,15 +699,33 @@ function App() {
               </button>
             </div>
             
-            <div className="user-profile">
+            <div className="user-profile" style={{ position: 'relative' }}>
               <div className="user-info">
-                <span className="user-name">Ganesh</span>
-                <span className="user-role">ADMIN</span>
+                <span className="user-name">{user.display_name}</span>
+                <span className="user-role" style={{ textTransform: 'uppercase' }}>{user.role}</span>
               </div>
-              <div className="avatar">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+              <div className="avatar" onClick={() => setActiveModal(activeModal === 'profileDropdown' ? null : 'profileDropdown')} style={{ cursor: 'pointer', background: 'linear-gradient(135deg, #3a7bd5, #3a6073)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'white' }}>
+                  {user.display_name.split(' ').map(n => n[0]).join('').substring(0, 2)}
+                </span>
               </div>
-              <Menu size={20} color="#64748b" style={{ cursor: 'pointer' }} />
+              <Menu size={20} color="#64748b" style={{ cursor: 'pointer' }} onClick={() => setActiveModal(activeModal === 'profileDropdown' ? null : 'profileDropdown')} />
+              
+              {activeModal === 'profileDropdown' && (
+                <div className="profile-dropdown-menu glass animate-scale-up" style={{ position: 'absolute', top: '110%', right: 0, width: '180px', padding: '8px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.95)', border: '1px solid rgba(255, 255, 255, 0.3)', backdropFilter: 'blur(10px)', boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15)', zIndex: 100 }}>
+                  <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(0, 0, 0, 0.05)', marginBottom: '6px' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#1e293b' }}>{user.display_name}</div>
+                    <div style={{ fontSize: '0.65rem', color: '#64748b', textTransform: 'capitalize', marginTop: '2px' }}>Role: {user.role}</div>
+                  </div>
+                  <button 
+                    onClick={handleLogout}
+                    style={{ display: 'flex', width: '100%', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '8px', border: 'none', background: 'transparent', color: '#ef4444', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s' }}
+                    className="dropdown-logout-btn"
+                  >
+                    Logout
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </header>
