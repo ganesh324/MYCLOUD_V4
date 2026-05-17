@@ -63,6 +63,29 @@ function App() {
   const [loadingCategory, setLoadingCategory] = useState(false);
   
   const [selectedPaths, setSelectedPaths] = useState([]);
+  const [swipedRecentIndex, setSwipedRecentIndex] = useState(null);
+  const touchStartX = useRef(0);
+  const touchCurrentX = useRef(0);
+
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchCurrentX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchMove = (e) => {
+    touchCurrentX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (index) => {
+    const diff = touchCurrentX.current - touchStartX.current;
+    if (diff < -50) {
+      setSwipedRecentIndex(index);
+    } else if (diff > 50) {
+      if (swipedRecentIndex === index) {
+        setSwipedRecentIndex(null);
+      }
+    }
+  };
 
   const openFolder = async (path) => {
     setCurrentView('fileManager');
@@ -942,24 +965,51 @@ function App() {
             {loading ? (
               <tr><td colSpan="4" className="empty-state">Loading...</td></tr>
             ) : recent.length > 0 ? (
-              recent.map((item, index) => (
-                <tr key={index}>
-                  <td>
-                    <div className="name-cell">
-                      <Star 
-                        size={18} 
-                        className={`star-toggle ${item.is_favorite ? 'active' : ''}`}
-                        onClick={() => toggleFavorite(item, true)}
-                        style={{ cursor: 'pointer' }}
-                      />
-                      {item.name}
+              recent.map((item, index) => {
+                const isSwiped = swipedRecentIndex === index;
+                return (
+                  <tr 
+                    key={index}
+                    className={`recent-row ${isSwiped ? 'swiped' : ''}`}
+                    onTouchStart={handleTouchStart}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={() => handleTouchEnd(index)}
+                  >
+                    <td>
+                      <div className="name-cell">
+                        <Star 
+                          size={18} 
+                          className={`star-toggle ${item.is_favorite ? 'active' : ''}`}
+                          onClick={() => toggleFavorite(item, true)}
+                          style={{ cursor: 'pointer' }}
+                        />
+                        {item.name}
+                      </div>
+                    </td>
+                    <td>{item.type}</td>
+                    <td>{formatSize(item.size)}</td>
+                    <td>{new Date(item.modified).toLocaleDateString()}</td>
+
+                    {/* Hidden Swipe Actions Panel (revealed on mobile swipe-left) */}
+                    <div className="recent-swipe-actions">
+                      <button 
+                        className={`action-btn fav ${item.is_favorite ? 'active' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); toggleFavorite(item, true); setSwipedRecentIndex(null); }}
+                        title="Star"
+                      >
+                        <Star size={16} />
+                      </button>
+                      <button 
+                        className="action-btn delete"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteClick(item); setSwipedRecentIndex(null); }}
+                        title="Delete"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
-                  </td>
-                  <td>{item.type}</td>
-                  <td>{formatSize(item.size)}</td>
-                  <td>{new Date(item.modified).toLocaleDateString()}</td>
-                </tr>
-              ))
+                  </tr>
+                );
+              })
             ) : (
               <tr><td colSpan="4" className="empty-state">No items found</td></tr>
             )}

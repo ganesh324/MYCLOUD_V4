@@ -2134,21 +2134,49 @@
   }
 
   .stats-card {
-    flex: 0 0 140px !important;
+    flex: 0 0 110px !important;
     scroll-snap-align: start;
-    height: 90px !important;
+    height: 64px !important;
     box-sizing: border-box;
     margin-bottom: 0 !important;
+    padding: 8px 10px !important;
+  }
+
+  .stats-card svg {
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  .stats-card .stats-info h3 {
+    font-size: 0.75rem !important;
+  }
+
+  .stats-card .stats-info p {
+    font-size: 0.55rem !important;
   }
 
   /* Make folders grid occupy compact tiles on small phone views */
   .folders-grid {
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)) !important;
-    gap: 12px !important;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)) !important;
+    gap: 10px !important;
   }
 
   .folder-card {
-    height: 90px !important; /* Make folders same clean size! */
+    height: 64px !important; /* Make folders same clean size! */
+    padding: 8px 10px !important;
+  }
+
+  .folder-card svg {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .folder-card .folder-info h4 {
+    font-size: 0.75rem !important;
+  }
+
+  .folder-card .folder-info p {
+    font-size: 0.55rem !important;
   }
 
   /* Convert Desktop Tables to Sleek Responsive Cards List on Mobile */
@@ -2188,6 +2216,69 @@
     padding: 0 !important;
     border: none !important;
     background: transparent !important;
+  }
+
+  /* Swipe-left activity row animation overlays */
+  .recent-activity-table tr.recent-row {
+    position: relative !important;
+    overflow: hidden !important;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  }
+
+  .recent-activity-table tr.recent-row td {
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  }
+
+  .recent-activity-table tr.recent-row.swiped td {
+    transform: translateX(-100px) !important;
+  }
+
+  .recent-swipe-actions {
+    position: absolute !important;
+    right: -100px !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 100px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    z-index: 100 !important;
+  }
+
+  .recent-activity-table tr.recent-row.swiped .recent-swipe-actions {
+    right: 0 !important;
+  }
+
+  .recent-swipe-actions .action-btn {
+    flex: 1 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border: none !important;
+    cursor: pointer !important;
+    color: white !important;
+    transition: opacity 0.2s !important;
+    height: 100% !important;
+  }
+
+  .recent-swipe-actions .action-btn:active {
+    opacity: 0.8 !important;
+  }
+
+  .recent-swipe-actions .action-btn.fav {
+    background: #f1f5f9 !important;
+    color: #94a3b8 !important;
+  }
+
+  .recent-swipe-actions .action-btn.fav.active {
+    color: #fbbf24 !important;
+  }
+
+  .recent-swipe-actions .action-btn.delete {
+    background: #ef4444 !important;
+    color: white !important;
+    border-top-right-radius: 16px !important;
+    border-bottom-right-radius: 16px !important;
   }
 
   /* Hide redundant columns on mobile to keep a clean row format */
