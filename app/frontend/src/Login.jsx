@@ -16,6 +16,7 @@ function Login({ onLoginSuccess }) {
     if (user === 'haritha') {
       setRoleMode('user');
     }
+    setPassword('');
     setError('');
   };
 
@@ -30,10 +31,10 @@ function Login({ onLoginSuccess }) {
     if (method === 'profile') {
       if (selectedUser === 'ganesh') {
         loginUsername = roleMode === 'admin' ? 'ganesh_admin' : 'ganesh';
-        loginPassword = 'Hello324';
+        loginPassword = password;
       } else if (selectedUser === 'haritha') {
         loginUsername = 'haritha';
-        loginPassword = 'Hello0611';
+        loginPassword = password;
       } else {
         setError('Please select a profile first');
         setLoading(false);
@@ -61,7 +62,7 @@ function Login({ onLoginSuccess }) {
 
       onLoginSuccess(data);
     } catch (err) {
-      setError(err.message || 'Incorrect username or password');
+      setError(err.message || 'Incorrect password');
     } finally {
       setLoading(false);
     }
@@ -136,6 +137,30 @@ function Login({ onLoginSuccess }) {
                   )}
                 </div>
               </div>
+
+              {selectedUser && (
+                <div className="input-group animate-slide-up" style={{ marginTop: '8px' }}>
+                  <label htmlFor="profile-password">Enter password for {selectedUser === 'ganesh' ? 'Ganesh' : 'Haritha'}</label>
+                  <div className="input-field-wrapper">
+                    <Lock size={18} className="input-icon" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      id="profile-password"
+                      placeholder="Enter password..."
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle-btn"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="profile-action-area">
                 <button
