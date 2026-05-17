@@ -966,47 +966,27 @@ function App() {
               <tr><td colSpan="4" className="empty-state">Loading...</td></tr>
             ) : recent.length > 0 ? (
               recent.map((item, index) => {
-                const isSwiped = swipedRecentIndex === index;
                 return (
-                  <tr 
-                    key={index}
-                    className={`recent-row ${isSwiped ? 'swiped' : ''}`}
-                    onTouchStart={handleTouchStart}
-                    onTouchMove={handleTouchMove}
-                    onTouchEnd={() => handleTouchEnd(index)}
-                  >
+                  <tr key={index} className="recent-row">
                     <td>
-                      <div className="name-cell">
-                        <Star 
-                          size={18} 
-                          className={`star-toggle ${item.is_favorite ? 'active' : ''}`}
-                          onClick={() => toggleFavorite(item, true)}
-                          style={{ cursor: 'pointer' }}
-                        />
-                        {item.name}
+                      <div className="name-cell" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {item.type === 'Folder' ? (
+                          <Folder size={18} color="#3a7bd5" style={{ flexShrink: 0 }} />
+                        ) : item.type === 'Image' ? (
+                          <ImageIcon size={18} color="#9b59b6" style={{ flexShrink: 0 }} />
+                        ) : item.type === 'Video' ? (
+                          <Video size={18} color="#e74c3c" style={{ flexShrink: 0 }} />
+                        ) : item.type === 'Music' ? (
+                          <Music size={18} color="#2ecc71" style={{ flexShrink: 0 }} />
+                        ) : (
+                          <FileText size={18} color="#94a3b8" style={{ flexShrink: 0 }} />
+                        )}
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
                       </div>
                     </td>
                     <td>{item.type}</td>
                     <td>{formatSize(item.size)}</td>
                     <td>{new Date(item.modified).toLocaleDateString()}</td>
-
-                    {/* Hidden Swipe Actions Panel (revealed on mobile swipe-left) */}
-                    <div className="recent-swipe-actions">
-                      <button 
-                        className={`action-btn fav ${item.is_favorite ? 'active' : ''}`}
-                        onClick={(e) => { e.stopPropagation(); toggleFavorite(item, true); setSwipedRecentIndex(null); }}
-                        title="Star"
-                      >
-                        <Star size={16} />
-                      </button>
-                      <button 
-                        className="action-btn delete"
-                        onClick={(e) => { e.stopPropagation(); handleDeleteClick(item); setSwipedRecentIndex(null); }}
-                        title="Delete"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
                   </tr>
                 );
               })
@@ -1056,6 +1036,7 @@ function App() {
                         key={idx} 
                         className={`fm-item grid-item ${selectedPaths.includes(item.path) ? 'checked' : ''}`} 
                         onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
+                        onContextMenu={(e) => handleItemContextMenu(e, item, false)}
                       >
                         <div 
                           className={`fm-grid-checkbox ${selectedPaths.includes(item.path) ? 'visible' : ''}`} 
@@ -1126,6 +1107,7 @@ function App() {
                             className={`fm-list-row ${selectedPaths.includes(item.path) ? 'checked' : ''}`}
                             onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
                             onClick={() => toggleSelectItem(item.path)}
+                            onContextMenu={(e) => handleItemContextMenu(e, item, false)}
                           >
                             <td style={{ paddingLeft: '16px', width: '40px' }} onClick={(e) => e.stopPropagation()}>
                               <input 
@@ -1442,9 +1424,9 @@ function App() {
           </div>
         )}
       </div>
+
     </div>
   );
 }
 
 export default App;
-
