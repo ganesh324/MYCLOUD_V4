@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Home, Folder, Star, Share2, Search, Upload, Plus, 
-  Menu, MoreVertical, Image as ImageIcon, Video, Music, FileText, ChevronRight, ArrowLeft,
-  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, AlertCircle, Loader2, Download
+  Menu, MoreVertical, Image as ImageIcon, Video, Music, FileText, ChevronRight, ChevronLeft, ArrowLeft,
+  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, AlertCircle, Loader2, Download, AlignLeft, X
 } from 'lucide-react';
 import './App.css';
 import Login from './Login';
@@ -24,6 +24,8 @@ window.fetch = async (url, options = {}) => {
 function App() {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [stats, setStats] = useState({
     images: 0, videos: 0, music: 0, files: 0, folders: 0, total_size: 0
@@ -511,125 +513,155 @@ function App() {
   const favoriteFolders = favorites.filter(f => f.type === 'Folder');
 
   return (
-    <div className="dashboard">
+    <div className={`dashboard ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileMenuOpen ? 'mobile-sidebar-open' : ''}`}>
+      {/* Mobile Backdrop */}
+      {mobileMenuOpen && (
+        <div className="sidebar-backdrop" onClick={() => setMobileMenuOpen(false)}></div>
+      )}
+
       {/* Sidebar */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${mobileMenuOpen ? 'mobile-open' : ''}`}>
         <div className="logo">
-          <img src="/logo.png" alt="MyCloud Logo" style={{ width: '32px', height: '32px', objectFit: 'contain' }} />
-          MyCloud
+          <img src="/logo.png" alt="MyCloud Logo" style={{ width: '32px', height: '32px', minWidth: '32px', objectFit: 'contain' }} />
+          {!sidebarCollapsed && <span className="logo-text animate-fade-in">MyCloud</span>}
+          
+          {/* Close button inside sidebar on mobile */}
+          <button className="mobile-sidebar-close" onClick={() => setMobileMenuOpen(false)}>
+            <X size={18} />
+          </button>
+
+          {/* Desktop collapse button */}
+          <button className="sidebar-collapse-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>
+            {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          </button>
         </div>
 
         <nav className="nav-menu">
-          <div className={`nav-item ${currentView === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentView('dashboard')}>
-            <Home size={20} />
-            Home
+          <div 
+            className={`nav-item ${currentView === 'dashboard' ? 'active' : ''}`} 
+            onClick={() => { setCurrentView('dashboard'); setMobileMenuOpen(false); }}
+            title="Home"
+          >
+            <Home size={20} style={{ minWidth: '20px' }} />
+            {!sidebarCollapsed && <span className="nav-text">Home</span>}
           </div>
-          <div className={`nav-item ${currentView === 'fileManager' ? 'active' : ''}`} onClick={() => openFolder('/mnt/Drive1')}>
-            <Folder size={20} />
-            All Files
+          <div 
+            className={`nav-item ${currentView === 'fileManager' ? 'active' : ''}`} 
+            onClick={() => { openFolder('/mnt/Drive1'); setMobileMenuOpen(false); }}
+            title="All Files"
+          >
+            <Folder size={20} style={{ minWidth: '20px' }} />
+            {!sidebarCollapsed && <span className="nav-text">All Files</span>}
           </div>
-          <div className="nav-item">
-            <Star size={20} />
-            Favorites
+          <div className="nav-item" title="Favorites">
+            <Star size={20} style={{ minWidth: '20px' }} />
+            {!sidebarCollapsed && <span className="nav-text">Favorites</span>}
           </div>
-          <div className="nav-item">
-            <Share2 size={20} />
-            Shared
+          <div className="nav-item" title="Shared">
+            <Share2 size={20} style={{ minWidth: '20px' }} />
+            {!sidebarCollapsed && <span className="nav-text">Shared</span>}
           </div>
         </nav>
 
-        <div className="storage-widget">
-          <div style={{ position: 'relative', width: '130px', height: '130px', margin: '0 auto 16px auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg width="130" height="130" viewBox="0 0 130 130" className="donut-chart">
-              <circle cx="65" cy="65" r="50" fill="none" stroke="#f1f5f9" strokeWidth="10" />
-              
-              {/* Images Circle */}
-              {stats.images > 0 && (
-                <circle 
-                  cx="65" 
-                  cy="65" 
-                  r="50" 
-                  fill="none" 
-                  stroke="#3a7bd5" 
-                  strokeWidth="10" 
-                  strokeDasharray={`${((stats.images / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
-                  strokeDashoffset={0}
-                  transform="rotate(-90 65 65)"
-                  style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
-                />
-              )}
-              
-              {/* Videos Circle */}
-              {stats.videos > 0 && (
-                <circle 
-                  cx="65" 
-                  cy="65" 
-                  r="50" 
-                  fill="none" 
-                  stroke="#8a2387" 
-                  strokeWidth="10" 
-                  strokeDasharray={`${((stats.videos / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
-                  strokeDashoffset={-((stats.images / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)}
-                  transform="rotate(-90 65 65)"
-                  style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
-                />
-              )}
-              
-              {/* Music Circle */}
-              {stats.music > 0 && (
-                <circle 
-                  cx="65" 
-                  cy="65" 
-                  r="50" 
-                  fill="none" 
-                  stroke="#10b981" 
-                  strokeWidth="10" 
-                  strokeDasharray={`${((stats.music / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
-                  strokeDashoffset={-(((stats.images + stats.videos) / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)}
-                  transform="rotate(-90 65 65)"
-                  style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
-                />
-              )}
-              
-              {/* Files Circle */}
-              {stats.files > 0 && (
-                <circle 
-                  cx="65" 
-                  cy="65" 
-                  r="50" 
-                  fill="none" 
-                  stroke="#fbbf24" 
-                  strokeWidth="10" 
-                  strokeDasharray={`${((stats.files / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
-                  strokeDashoffset={-(((stats.images + stats.videos + stats.music) / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)}
-                  transform="rotate(-90 65 65)"
-                  style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
-                />
-              )}
-              
-              <text x="65" y="62" textAnchor="middle" style={{ fill: 'var(--text-main)', fontSize: '1rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif' }}>
-                {stats.images + stats.videos + stats.music + stats.files}
-              </text>
-              <text x="65" y="74" textAnchor="middle" style={{ fill: 'var(--text-muted)', fontSize: '0.55rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Files
-              </text>
-            </svg>
+        {!sidebarCollapsed && (
+          <div className="storage-widget animate-scale-up">
+            <div style={{ position: 'relative', width: '130px', height: '130px', margin: '0 auto 16px auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="130" height="130" viewBox="0 0 130 130" className="donut-chart">
+                <circle cx="65" cy="65" r="50" fill="none" stroke="#f1f5f9" strokeWidth="10" />
+                
+                {/* Images Circle */}
+                {stats.images > 0 && (
+                  <circle 
+                    cx="65" 
+                    cy="65" 
+                    r="50" 
+                    fill="none" 
+                    stroke="#3a7bd5" 
+                    strokeWidth="10" 
+                    strokeDasharray={`${((stats.images / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
+                    strokeDashoffset={0}
+                    transform="rotate(-90 65 65)"
+                    style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
+                  />
+                )}
+                
+                {/* Videos Circle */}
+                {stats.videos > 0 && (
+                  <circle 
+                    cx="65" 
+                    cy="65" 
+                    r="50" 
+                    fill="none" 
+                    stroke="#8a2387" 
+                    strokeWidth="10" 
+                    strokeDasharray={`${((stats.videos / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
+                    strokeDashoffset={-((stats.images / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)}
+                    transform="rotate(-90 65 65)"
+                    style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
+                  />
+                )}
+                
+                {/* Music Circle */}
+                {stats.music > 0 && (
+                  <circle 
+                    cx="65" 
+                    cy="65" 
+                    r="50" 
+                    fill="none" 
+                    stroke="#10b981" 
+                    strokeWidth="10" 
+                    strokeDasharray={`${((stats.music / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
+                    strokeDashoffset={-(((stats.images + stats.videos) / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)}
+                    transform="rotate(-90 65 65)"
+                    style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
+                  />
+                )}
+                
+                {/* Files Circle */}
+                {stats.files > 0 && (
+                  <circle 
+                    cx="65" 
+                    cy="65" 
+                    r="50" 
+                    fill="none" 
+                    stroke="#fbbf24" 
+                    strokeWidth="10" 
+                    strokeDasharray={`${((stats.files / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
+                    strokeDashoffset={-(((stats.images + stats.videos + stats.music) / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)}
+                    transform="rotate(-90 65 65)"
+                    style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
+                  />
+                )}
+                
+                <text x="65" y="62" textAnchor="middle" style={{ fill: 'var(--text-main)', fontSize: '1rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif' }}>
+                  {stats.images + stats.videos + stats.music + stats.files}
+                </text>
+                <text x="65" y="74" textAnchor="middle" style={{ fill: 'var(--text-muted)', fontSize: '0.55rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Files
+                </text>
+              </svg>
+            </div>
+            <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#94a3b8', letterSpacing: '1px', marginBottom: '12px', textTransform: 'uppercase' }}>
+              Storage Distribution
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '0.62rem', color: '#64748b' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3a7bd5' }}></div> Images</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#8a2387' }}></div> Videos</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }}></div> Music</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fbbf24' }}></div> Files</span>
+            </div>
           </div>
-          <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#94a3b8', letterSpacing: '1px', marginBottom: '12px', textTransform: 'uppercase' }}>
-            Storage Distribution
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '0.62rem', color: '#64748b' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3a7bd5' }}></div> Images</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#8a2387' }}></div> Videos</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }}></div> Music</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fbbf24' }}></div> Files</span>
-          </div>
-        </div>
+        )}
       </aside>
 
       {/* Main Content */}
       <main className="main-content">
         <header className="header">
+          {/* Mobile hamburger menu trigger */}
+          <button className="mobile-menu-trigger" onClick={() => setMobileMenuOpen(true)}>
+            <AlignLeft size={22} />
+          </button>
+
           <div className="search-bar-container" style={{ position: 'relative' }}>
             <div className="search-bar">
               <Search size={18} color="#94a3b8" />
