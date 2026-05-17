@@ -7,6 +7,13 @@ import {
 import './App.css';
 import Login from './Login';
 
+const ACCENT_THEMES = [
+  { id: 'deep-ocean', name: 'Deep Ocean Blue', colors: ['#3a7bd5', '#1e5de6'] },
+  { id: 'emerald-pine', name: 'Emerald Pine', colors: ['#059669', '#064e3b'] },
+  { id: 'dark-obsidian', name: 'Dark Obsidian', colors: ['#475569', '#020617'] },
+  { id: 'solarized-bronze', name: 'Solarized Bronze', colors: ['#d97706', '#78350f'] }
+];
+
 // Setup global fetch interceptor for MyCloud session tokens
 const originalFetch = window.fetch;
 window.fetch = async (url, options = {}) => {
@@ -32,6 +39,7 @@ function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [accentTheme, setAccentTheme] = useState(() => localStorage.getItem('mycloud_accent_theme') || 'deep-ocean');
 
   const [stats, setStats] = useState({
     images: 0, videos: 0, music: 0, files: 0, folders: 0, total_size: 0
@@ -44,7 +52,6 @@ function App() {
   const [folderContents, setFolderContents] = useState([]);
   const [loadingFolder, setLoadingFolder] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
-  const [recentViewMode, setRecentViewMode] = useState('list');
   const [activeModal, setActiveModal] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [renameInput, setRenameInput] = useState('');
@@ -58,7 +65,9 @@ function App() {
   const [newFolderName, setNewFolderName] = useState('');
   const [uploadQueue, setUploadQueue] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [isCanvasDragging, setIsCanvasDragging] = useState(false);
   const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
 
   // Advanced States: Search, Category Gallery, Bulk Selections
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,6 +80,10 @@ function App() {
   
   const [selectedPaths, setSelectedPaths] = useState([]);
   const [mobileActiveItem, setMobileActiveItem] = useState(null);
+  const [sortBy, setSortBy] = useState('name');
+  const [typeFilter, setTypeFilter] = useState('All');
+  const [toolsData, setToolsData] = useState({ trash: [], users: [], activity: [], index: null });
+  const [operationTarget, setOperationTarget] = useState('');
 
   const openFolder = async (path) => {
     setCurrentView('fileManager');
@@ -159,6 +172,11 @@ function App() {
     });
     fetchStats();
   };
+
+  useEffect(() => {
+    document.documentElement.dataset.accentTheme = accentTheme;
+    localStorage.setItem('mycloud_accent_theme', accentTheme);
+  }, [accentTheme]);
 
   const handleLogout = () => {
     localStorage.removeItem("mycloud_token");
@@ -298,18 +316,62 @@ function App() {
     }
   };
 
+  const collectDroppedFiles = async (dataTransfer) => {
+    const entries = Array.from(dataTransfer.items || [])
+      .map(item => item.webkitGetAsEntry?.())
+      .filter(Boolean);
+
+    if (entries.length === 0) return Array.from(dataTransfer.files || []);
+
+    const readDirectory = (reader) => new Promise((resolve) => reader.readEntries(resolve));
+
+    const walkEntry = async (entry, prefix = '') => {
+      if (entry.isFile) {
+        return new Promise((resolve) => {
+          entry.file((file) => {
+            file.relativePath = `${prefix}${file.name}`;
+            resolve([file]);
+          });
+        });
+      }
+
+      if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const children = [];
+        let batch = [];
+        do {
+          batch = await readDirectory(reader);
+          children.push(...batch);
+        } while (batch.length > 0);
+
+        const nested = await Promise.all(children.map(child => walkEntry(child, `${prefix}${entry.name}/`)));
+        return nested.flat();
+      }
+
+      return [];
+    };
+
+    const files = await Promise.all(entries.map(entry => walkEntry(entry)));
+    return files.flat();
+  };
+
   const handleUploadFiles = async (files) => {
-    if (!files || files.length === 0) return;
+    const fileList = Array.from(files || []);
+    if (fileList.length === 0) return;
     setActiveModal('uploadCenter');
     
-    const newItems = Array.from(files).map((f, idx) => ({
-      id: Date.now() + '-' + idx,
-      name: f.name,
-      size: f.size,
-      progress: 0,
-      status: 'pending',
-      file: f
-    }));
+    const newItems = fileList.map((f, idx) => {
+      const relativePath = f.webkitRelativePath || f.relativePath || f.name;
+      return {
+        id: Date.now() + '-' + idx,
+        name: relativePath,
+        size: f.size,
+        progress: 0,
+        status: 'pending',
+        file: f,
+        relativePath
+      };
+    });
     
     setUploadQueue(prev => [...prev, ...newItems]);
     
@@ -325,6 +387,7 @@ function App() {
     return new Promise((resolve) => {
       const formData = new FormData();
       formData.append('path', currentPath);
+      formData.append('relative_path', queueItem.relativePath || queueItem.file.name);
       formData.append('file', queueItem.file);
       
       const xhr = new XMLHttpRequest();
@@ -344,8 +407,14 @@ function App() {
             item.id === queueItem.id ? { ...item, progress: 100, status: 'completed' } : item
           ));
         } else {
+          let message = 'Upload failed';
+          try {
+            message = JSON.parse(xhr.responseText)?.detail || message;
+          } catch {
+            message = xhr.responseText || message;
+          }
           setUploadQueue(prev => prev.map(item => 
-            item.id === queueItem.id ? { ...item, status: 'error' } : item
+            item.id === queueItem.id ? { ...item, status: 'error', error: message } : item
           ));
         }
         resolve();
@@ -457,7 +526,7 @@ function App() {
   };
 
   const handleBulkDelete = async () => {
-    if (!window.confirm(`Are you sure you want to delete ${selectedPaths.length} items? This cannot be undone.`)) {
+    if (!window.confirm(`Move ${selectedPaths.length} selected item${selectedPaths.length === 1 ? '' : 's'} to Trash? You can restore them later from Trash.`)) {
       return;
     }
     
@@ -504,6 +573,89 @@ function App() {
     }
   };
 
+  const loadToolsData = async () => {
+    const requests = [
+      fetch('/api/trash').then(r => r.ok ? r.json() : { trash: [] }),
+      fetch('/api/activity').then(r => r.ok ? r.json() : { activity: [] }),
+      fetch('/api/index/status').then(r => r.ok ? r.json() : null)
+    ];
+    if (user?.role === 'admin') {
+      requests.push(fetch('/api/admin/users').then(r => r.ok ? r.json() : { users: [] }));
+    }
+    const [trash, activity, index, users] = await Promise.all(requests);
+    setToolsData({ trash: trash.trash || [], activity: activity.activity || [], index, users: users?.users || [] });
+  };
+
+  const openTools = async () => {
+    setActiveModal('tools');
+    await loadToolsData();
+  };
+
+  const restoreTrashItem = async (id) => {
+    const res = await fetch(`/api/trash/${id}/restore`, { method: 'POST' });
+    if (!res.ok) alert('Failed to restore item');
+    await loadTrashView();
+    await loadToolsData();
+    fetchStats();
+  };
+
+  const permanentlyDeleteTrashItem = async (id) => {
+    if (!window.confirm('Permanently delete this item? This cannot be undone.')) return;
+    const res = await fetch(`/api/trash/${id}`, { method: 'DELETE' });
+    if (!res.ok) alert('Failed to permanently delete item');
+    await loadTrashView();
+    await loadToolsData();
+  };
+
+  const loadTrashView = async () => {
+    const res = await fetch('/api/trash');
+    const data = res.ok ? await res.json() : { trash: [] };
+    setToolsData(prev => ({ ...prev, trash: data.trash || [] }));
+  };
+
+  const openTrashView = async () => {
+    setCurrentView('trash');
+    setMobileMenuOpen(false);
+    await loadTrashView();
+  };
+
+  const runReindex = async () => {
+    const res = await fetch('/api/index/reindex', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) alert(data.detail || 'Re-index failed');
+    await loadToolsData();
+    fetchStats();
+  };
+
+  const shareItem = async (item) => {
+    const res = await fetch('/api/share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: item.path, expires_hours: 24 })
+    });
+    const data = await res.json();
+    if (!res.ok) return alert(data.detail || 'Failed to create share link');
+    const url = `${window.location.origin}${data.url}`;
+    await navigator.clipboard?.writeText(url);
+    alert(`Share link copied:
+${url}`);
+  };
+
+  const operateOnSelected = async (mode) => {
+    if (!operationTarget.trim() || selectedPaths.length === 0) return alert('Select items and enter a target folder');
+    for (const path of selectedPaths) {
+      await fetch(`/api/files/${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_path: path, target_dir: operationTarget.trim() })
+      });
+    }
+    setSelectedPaths([]);
+    setOperationTarget('');
+    openFolder(currentPath);
+    fetchStats();
+  };
+
   const formatSize = (bytes) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -526,6 +678,16 @@ function App() {
   }
 
   const favoriteFolders = favorites.filter(f => f.type === 'Folder');
+  const visibleFolderContents = folderContents
+    .filter(item => typeFilter === 'All' || item.type === typeFilter)
+    .sort((a, b) => {
+      if (a.type === 'Folder' && b.type !== 'Folder') return -1;
+      if (a.type !== 'Folder' && b.type === 'Folder') return 1;
+      if (sortBy === 'size') return (b.size || 0) - (a.size || 0);
+      if (sortBy === 'modified') return (b.modified || 0) - (a.modified || 0);
+      if (sortBy === 'type') return a.type.localeCompare(b.type) || a.name.localeCompare(b.name);
+      return a.name.localeCompare(b.name);
+    });
 
   return (
     <div className={`dashboard ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileMenuOpen ? 'mobile-sidebar-open' : ''}`}>
@@ -576,6 +738,14 @@ function App() {
             <Share2 size={20} style={{ minWidth: '20px' }} />
             {!sidebarCollapsed && <span className="nav-text">Shared</span>}
           </div>
+          <div 
+            className={`nav-item ${currentView === 'trash' ? 'active' : ''}`}
+            onClick={openTrashView}
+            title="Trash"
+          >
+            <Trash2 size={20} style={{ minWidth: '20px' }} />
+            {!sidebarCollapsed && <span className="nav-text">Trash</span>}
+          </div>
         </nav>
 
         {!sidebarCollapsed && (
@@ -591,7 +761,7 @@ function App() {
                     cy="65" 
                     r="50" 
                     fill="none" 
-                    stroke="#3a7bd5" 
+                    stroke="var(--chart-images)" 
                     strokeWidth="10" 
                     strokeDasharray={`${((stats.images / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
                     strokeDashoffset={0}
@@ -660,7 +830,7 @@ function App() {
               Storage Distribution
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '0.62rem', color: '#64748b' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#3a7bd5' }}></div> Images</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--chart-images)' }}></div> Images</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#8a2387' }}></div> Videos</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }}></div> Music</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fbbf24' }}></div> Files</span>
@@ -738,6 +908,15 @@ function App() {
                 style={{ display: 'none' }} 
                 onChange={(e) => handleUploadFiles(e.target.files)} 
               />
+              <input
+                type="file"
+                multiple
+                ref={folderInputRef}
+                style={{ display: 'none' }}
+                webkitdirectory=""
+                directory=""
+                onChange={(e) => handleUploadFiles(e.target.files)}
+              />
               <button className="btn-primary" onClick={() => { setActiveModal('uploadCenter'); }}>
                 <Upload size={18} />
                 Upload
@@ -753,7 +932,7 @@ function App() {
                 <span className="user-name">{user.display_name}</span>
                 <span className="user-role" style={{ textTransform: 'uppercase' }}>{user.role}</span>
               </div>
-              <div className="avatar" onClick={() => setActiveModal(activeModal === 'profileDropdown' ? null : 'profileDropdown')} style={{ cursor: 'pointer', background: 'linear-gradient(135deg, #3a7bd5, #3a6073)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div className="avatar" onClick={() => setActiveModal(activeModal === 'profileDropdown' ? null : 'profileDropdown')} style={{ cursor: 'pointer', background: 'var(--accent-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'white' }}>
                   {user.display_name.split(' ').map(n => n[0]).join('').substring(0, 2)}
                 </span>
@@ -761,11 +940,35 @@ function App() {
               <Menu size={20} color="#64748b" style={{ cursor: 'pointer' }} onClick={() => setActiveModal(activeModal === 'profileDropdown' ? null : 'profileDropdown')} />
               
               {activeModal === 'profileDropdown' && (
-                <div className="profile-dropdown-menu glass animate-scale-up" style={{ position: 'absolute', top: '110%', right: 0, width: '180px', padding: '8px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.95)', border: '1px solid rgba(255, 255, 255, 0.3)', backdropFilter: 'blur(10px)', boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15)', zIndex: 100 }}>
+                <div className="profile-dropdown-menu glass animate-scale-up" style={{ position: 'absolute', top: '110%', right: 0, width: '260px', padding: '8px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.95)', border: '1px solid rgba(255, 255, 255, 0.3)', backdropFilter: 'blur(10px)', boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15)', zIndex: 100 }}>
                   <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(0, 0, 0, 0.05)', marginBottom: '6px' }}>
                     <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#1e293b' }}>{user.display_name}</div>
                     <div style={{ fontSize: '0.65rem', color: '#64748b', textTransform: 'capitalize', marginTop: '2px' }}>Role: {user.role}</div>
                   </div>
+                  <div className="accent-theme-picker">
+                    <div className="accent-theme-label">Accent Theme</div>
+                    <div className="accent-theme-grid">
+                      {ACCENT_THEMES.map((theme) => (
+                        <button
+                          key={theme.id}
+                          type="button"
+                          className={`accent-theme-option ${accentTheme === theme.id ? 'active' : ''}`}
+                          onClick={() => setAccentTheme(theme.id)}
+                          title={theme.name}
+                        >
+                          <span className="accent-theme-swatch" style={{ background: `linear-gradient(135deg, ${theme.colors[0]}, ${theme.colors[1]})` }} />
+                          <span>{theme.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    onClick={openTools}
+                    className="dropdown-tools-btn"
+                    style={{ display: 'flex', width: '100%', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '8px', border: 'none', background: 'transparent', color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', textAlign: 'left' }}
+                  >
+                    Tools & Admin
+                  </button>
                   <button 
                     onClick={handleLogout}
                     style={{ display: 'flex', width: '100%', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '8px', border: 'none', background: 'transparent', color: '#ef4444', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s' }}
@@ -942,25 +1145,9 @@ function App() {
 
         <div className="section-header mobile-recent-header">
           <span>RECENT ACTIVITY</span>
-          <div className="recent-view-toggle desktop-only" style={{ display: 'flex', alignItems: 'center' }}>
-            <button 
-              className={`btn-icon ${recentViewMode === 'grid' ? 'active' : ''}`} 
-              onClick={() => setRecentViewMode('grid')}
-              style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
-            >
-              <LayoutGrid size={16} />
-            </button>
-            <button 
-              className={`btn-icon ${recentViewMode === 'list' ? 'active' : ''}`} 
-              onClick={() => setRecentViewMode('list')}
-              style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
-            >
-              <List size={16} />
-            </button>
-          </div>
         </div>
         
-        <div className={`recent-activity-container mode-${recentViewMode}`}>
+        <div className="recent-activity-container mode-list">
           {/* List/Table Format */}
           <div className="recent-list-view">
             <table className="recent-activity-table animate-fade-in" style={{ animationDelay: '0.5s' }}>
@@ -1043,33 +1230,133 @@ function App() {
           </div>
         </div>
           </>
+        ) : currentView === 'trash' ? (
+          <div className="trash-view animate-fade-in">
+            <div className="section-header mobile-recent-header">
+              <span>TRASH</span>
+              <button className="btn-modal-secondary" onClick={loadTrashView}>Refresh</button>
+            </div>
+            <div className="trash-list">
+              {toolsData.trash.length === 0 ? (
+                <div className="empty-state">Trash is empty</div>
+              ) : toolsData.trash.map(item => (
+                <div className="trash-row" key={item.id}>
+                  <div className="trash-info">
+                    {item.type === 'Folder' ? <Folder size={22} color="var(--primary)" /> : <FileText size={22} color="#94a3b8" />}
+                    <div>
+                      <strong>{item.name}</strong>
+                      <span>{item.type} • Deleted {new Date(item.deleted_at).toLocaleString()}</span>
+                      <small>{item.original_path}</small>
+                    </div>
+                  </div>
+                  <div className="trash-actions">
+                    <button className="btn-modal-primary" onClick={() => restoreTrashItem(item.id)}>Restore</button>
+                    <button className="btn-modal-secondary" onClick={() => permanentlyDeleteTrashItem(item.id)}>Delete Forever</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         ) : (
-          <div className="file-manager-view animate-fade-in">
-            <div className="breadcrumb">
-              <button className="btn-icon" onClick={navigateUp}><ArrowLeft size={20} /></button>
-              <div className="path-text">
-                {currentPath.split('/').filter(Boolean).map((part, idx, arr) => (
-                  <span key={idx} className="breadcrumb-part">
-                    {part}
-                    {idx < arr.length - 1 && <ChevronRight size={16} />}
-                  </span>
-                ))}
+          <div
+            className={`file-manager-view animate-fade-in ${isCanvasDragging ? 'canvas-dragging' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsCanvasDragging(true); }}
+            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsCanvasDragging(true); }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget)) setIsCanvasDragging(false);
+            }}
+            onDrop={async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsCanvasDragging(false);
+              handleUploadFiles(await collectDroppedFiles(e.dataTransfer));
+            }}
+          >
+            {isCanvasDragging && (
+              <div className="canvas-drop-overlay">
+                <CloudUpload size={34} />
+                <span>Drop files or folders to upload here</span>
               </div>
-              <div className="view-mode-toggle" style={{ display: 'flex', alignItems: 'center' }}>
-                <button 
-                  className={`btn-select-all ${folderContents.length > 0 && folderContents.every(i => selectedPaths.includes(i.path)) ? 'active' : ''}`}
-                  onClick={toggleSelectAll}
-                  style={{ marginRight: '12px', fontSize: '0.75rem', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'white', fontWeight: 600, color: 'var(--text-main)', cursor: 'pointer', transition: 'all 0.2s' }}
-                >
-                  {folderContents.length > 0 && folderContents.every(i => selectedPaths.includes(i.path)) ? 'Deselect All' : 'Select All'}
+            )}
+            <div className={`fm-command-band ${selectedPaths.length > 0 ? 'selection-active' : ''}`}>
+              <div className="fm-command-path">
+                <button className="btn-icon" onClick={selectedPaths.length > 0 ? () => setSelectedPaths([]) : navigateUp} title={selectedPaths.length > 0 ? 'Clear selection' : 'Back'}>
+                  {selectedPaths.length > 0 ? <Plus size={20} style={{ transform: 'rotate(45deg)' }} /> : <ArrowLeft size={20} />}
                 </button>
-                <button className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')} style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}>
-                  <LayoutGrid size={18} />
-                </button>
-                <button className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')} style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}>
-                  <List size={18} />
-                </button>
+                {selectedPaths.length > 0 ? (
+                  <strong>{selectedPaths.length} selected</strong>
+                ) : (
+                  <div className="path-text">
+                    {currentPath.split('/').filter(Boolean).map((part, idx, arr) => (
+                      <span key={idx} className="breadcrumb-part">
+                        {part}
+                        {idx < arr.length - 1 && <ChevronRight size={16} />}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
+
+              {selectedPaths.length > 0 ? (
+                <div className="fm-command-actions selection-actions">
+                  <button className="fm-command-btn primary" onClick={handleBulkDownload} title="Download selected as ZIP">
+                    <Download size={16} />
+                    <span>Download</span>
+                  </button>
+                  <button className="fm-command-btn" onClick={handleBulkFavorite} title="Star selected">
+                    <Star size={16} />
+                    <span>Star</span>
+                  </button>
+                  <input className="batch-target-input" value={operationTarget} onChange={(e) => setOperationTarget(e.target.value)} placeholder="Target folder path" />
+                  <button className="fm-command-btn" onClick={() => operateOnSelected('copy')}>Copy</button>
+                  <button className="fm-command-btn" onClick={() => operateOnSelected('move')}>Move</button>
+                  <button className="fm-command-btn danger" onClick={handleBulkDelete} title="Move selected to Trash">
+                    <Trash2 size={16} />
+                    <span>Delete</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="fm-command-actions">
+                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                    <option value="name">Sort: Name</option>
+                    <option value="modified">Sort: Modified</option>
+                    <option value="size">Sort: Size</option>
+                    <option value="type">Sort: Type</option>
+                  </select>
+                  <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+                    <option value="All">All types</option>
+                    <option value="Folder">Folders</option>
+                    <option value="Image">Images</option>
+                    <option value="Video">Videos</option>
+                    <option value="Music">Music</option>
+                    <option value="PDF">PDFs</option>
+                    <option value="Text">Text</option>
+                    <option value="File">Files</option>
+                  </select>
+                  <button className="fm-command-btn" onClick={() => setActiveModal('newFolder')} title="New Folder">
+                    <Folder size={16} />
+                    <span>Folder</span>
+                  </button>
+                  <button className="fm-command-btn" onClick={() => setActiveModal('uploadCenter')} title="Upload Files">
+                    <CloudUpload size={16} />
+                    <span>Upload</span>
+                  </button>
+                  <button
+                    className={`fm-command-btn ${folderContents.length > 0 && folderContents.every(i => selectedPaths.includes(i.path)) ? 'active' : ''}`}
+                    onClick={toggleSelectAll}
+                  >
+                    Select All
+                  </button>
+                  <div className="view-mode-toggle">
+                    <button className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')} title="Grid view">
+                      <LayoutGrid size={18} />
+                    </button>
+                    <button className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')} title="List view">
+                      <List size={18} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             
             {loadingFolder ? (
@@ -1078,7 +1365,7 @@ function App() {
               <>
                 {viewMode === 'grid' ? (
                   <div className="fm-grid">
-                    {folderContents.map((item, idx) => (
+                    {visibleFolderContents.map((item, idx) => (
                       <div 
                         key={idx} 
                         className={`fm-item grid-item ${selectedPaths.includes(item.path) ? 'checked' : ''}`} 
@@ -1154,7 +1441,7 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {folderContents.map((item, idx) => (
+                        {visibleFolderContents.map((item, idx) => (
                           <tr 
                             key={idx} 
                             className={`fm-list-row ${selectedPaths.includes(item.path) ? 'checked' : ''}`}
@@ -1217,7 +1504,7 @@ function App() {
                     </table>
                   </div>
                 )}
-                {folderContents.length === 0 && (
+                {visibleFolderContents.length === 0 && (
                   <div className="empty-state">This folder is empty</div>
                 )}
               </>
@@ -1254,11 +1541,11 @@ function App() {
       {activeModal === 'delete' && selectedItem && (
         <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
           <div className="modal-content glass delete" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Confirm Deletion</h3>
-            <p className="modal-text">Are you sure you want to delete the {selectedItem.type.toLowerCase()} <strong>{selectedItem.name}</strong>? This action cannot be undone.</p>
+            <h3 className="modal-title">Move to Trash</h3>
+            <p className="modal-text">Move the {selectedItem.type.toLowerCase()} <strong>{selectedItem.name}</strong> to Trash? You can restore it later from the Trash view.</p>
             <div className="modal-footer">
               <button type="button" className="btn-modal-secondary" onClick={() => setActiveModal(null)}>Cancel</button>
-              <button type="button" className="btn-modal-danger" onClick={handleDeleteSubmit}>Delete</button>
+              <button type="button" className="btn-modal-danger" onClick={handleDeleteSubmit}>Move to Trash</button>
             </div>
           </div>
         </div>
@@ -1380,12 +1667,15 @@ function App() {
               className={`dropzone ${isDragging ? 'dragging' : ''}`}
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleUploadFiles(e.dataTransfer.files); }}
-              onClick={() => fileInputRef.current.click()}
+              onDrop={async (e) => { e.preventDefault(); setIsDragging(false); handleUploadFiles(await collectDroppedFiles(e.dataTransfer)); }}
             >
               <CloudUpload size={48} className="dropzone-icon" />
-              <p className="dropzone-text">Drag & drop files here or <span className="browse-link">browse</span></p>
-              <p className="dropzone-sub">Supports uploading multiple files at once</p>
+              <p className="dropzone-text">Drag & drop files or folders here</p>
+              <p className="dropzone-sub">Folder structure is preserved when supported by your browser</p>
+              <div className="upload-choice-row">
+                <button type="button" className="btn-modal-primary" onClick={() => fileInputRef.current.click()}>Choose Files</button>
+                <button type="button" className="btn-modal-secondary" onClick={() => folderInputRef.current.click()}>Choose Folder</button>
+              </div>
             </div>
             
             {uploadQueue.length > 0 && (
@@ -1429,62 +1719,42 @@ function App() {
         </div>
       )}
 
-      {/* Floating Batch Operations Tray */}
-      {selectedPaths.length > 0 && (
-        <div className="batch-tray-container animate-slide-up">
-          <div className="batch-tray glass">
-            <span className="batch-count">{selectedPaths.length} items selected</span>
-            
-            <div className="batch-actions-row">
-              <button className="btn-batch primary" onClick={handleBulkDownload}>
-                <Download size={16} />
-                Download ZIP
-              </button>
-              <button className="btn-batch secondary" onClick={handleBulkFavorite}>
-                <Star size={16} />
-                Star Selected
-              </button>
-              <button className="btn-batch danger" onClick={handleBulkDelete}>
-                <Trash2 size={16} />
-                Delete Selected
-              </button>
-              <div className="batch-divider"></div>
-              <button className="btn-icon close-btn" onClick={() => setSelectedPaths([])}>
-                <Plus size={20} style={{ transform: 'rotate(45deg)' }} />
-              </button>
+
+      {activeModal === 'tools' && (
+        <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
+          <div className="modal-content glass tools-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Tools & Admin</h3>
+            <div className="tools-grid">
+              <section>
+                <h4>Trash</h4>
+                {toolsData.trash.slice(0, 6).map(item => (
+                  <div className="tool-row" key={item.id}>
+                    <span>{item.name}</span>
+                    <button onClick={() => restoreTrashItem(item.id)}>Restore</button>
+                  </div>
+                ))}
+                {toolsData.trash.length === 0 && <p>No trash items</p>}
+              </section>
+              <section>
+                <h4>Index</h4>
+                <p>DB modified: {toolsData.index?.database_modified ? new Date(toolsData.index.database_modified * 1000).toLocaleString() : 'Unknown'}</p>
+                {user.role === 'admin' && <button className="btn-modal-primary" onClick={runReindex}>Re-index Now</button>}
+              </section>
+              {user.role === 'admin' && (
+                <section>
+                  <h4>Users</h4>
+                  {toolsData.users.map(u => <div className="tool-row" key={u.username}><span>{u.display_name}</span><small>{u.role}</small></div>)}
+                </section>
+              )}
+              <section>
+                <h4>Activity</h4>
+                {toolsData.activity.slice(0, 8).map((a, idx) => <div className="tool-row" key={idx}><span>{a.action}</span><small>{a.actor}</small></div>)}
+              </section>
             </div>
+            <div className="modal-footer"><button className="btn-modal-secondary" onClick={() => setActiveModal(null)}>Close</button></div>
           </div>
         </div>
       )}
-
-      {/* Mobile Floating Action Button (FAB) */}
-      <div className="mobile-fab-container">
-        <button 
-          className={`mobile-fab ${activeModal === 'fabMenu' ? 'active' : ''}`}
-          onClick={() => setActiveModal(activeModal === 'fabMenu' ? null : 'fabMenu')}
-          title="Add Actions"
-        >
-          <Plus size={24} style={{ transform: activeModal === 'fabMenu' ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s ease' }} />
-        </button>
-        {activeModal === 'fabMenu' && (
-          <div className="mobile-fab-menu glass animate-scale-up">
-            <button 
-              className="fab-menu-item" 
-              onClick={() => { setActiveModal('newFolder'); }}
-            >
-              <Folder size={18} />
-              <span>New Folder</span>
-            </button>
-            <button 
-              className="fab-menu-item" 
-              onClick={() => { setActiveModal('uploadCenter'); }}
-            >
-              <CloudUpload size={18} />
-              <span>Upload Files</span>
-            </button>
-          </div>
-        )}
-      </div>
 
       {/* Modern Blurred Mobile Options Bottom Sheet */}
       {mobileActiveItem && (
@@ -1539,6 +1809,13 @@ function App() {
                 </a>
               )}
               
+              {mobileActiveItem.type !== 'Folder' && (
+                <button className="mobile-sheet-action-btn" onClick={() => { shareItem(mobileActiveItem); setMobileActiveItem(null); }}>
+                  <Share2 size={16} color="#64748b" />
+                  <span>Share Link</span>
+                </button>
+              )}
+
               <button 
                 className="mobile-sheet-action-btn danger"
                 onClick={() => {

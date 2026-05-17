@@ -1,13 +1,18 @@
-FROM node:20-slim
+FROM node:20-slim AS build
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
+RUN npm run build
 
-EXPOSE 3000
+FROM nginx:1.27-alpine
 
-# Runs Vite in development mode and exposes it to your local network
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,0 +1,24 @@
+services:
+  backend:
+    build:
+      context: ./app/backend
+    container_name: mycloud-backend
+    restart: unless-stopped
+    environment:
+      MYCLOUD_STORAGE_ROOT: /mnt/Drive1
+      MYCLOUD_SECRET_KEY: ${MYCLOUD_SECRET_KEY:-mycloud_dev_secret_change_me}
+    volumes:
+      - ./app/data:/app/data
+      - /mnt/Drive1:/mnt/Drive1
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: ./app/frontend
+    container_name: mycloud-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"

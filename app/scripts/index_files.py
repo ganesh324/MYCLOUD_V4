@@ -21,6 +21,19 @@ def init_db():
             modified_time TEXT
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS file_permissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL,
+            username TEXT NOT NULL,
+            permission TEXT NOT NULL DEFAULT 'full',
+            granted_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(path, username)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_permissions_username ON file_permissions(username)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_permissions_path ON file_permissions(path)")
     conn.commit()
     conn.close()
 

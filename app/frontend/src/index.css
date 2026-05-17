@@ -1,5 +1,9 @@
 :root {
   --primary: #1e5de6;
+  --primary-hover: #154cbd;
+  --accent-gradient: linear-gradient(135deg, #3a7bd5, #3a6073);
+  --accent-soft: #e4effd;
+  --accent-ring: rgba(30, 93, 230, 0.4);
   --bg-color: #f7f9fc;
   --text-main: #333333;
   --text-muted: #888888;
@@ -8,8 +12,12 @@
   --card-green: linear-gradient(135deg, #27ae60, #2ecc71);
   --card-orange: linear-gradient(135deg, #f39c12, #e67e22);
   --card-teal: linear-gradient(135deg, #16a085, #1abc9c);
+  --chart-images: #3a7bd5;
+  --chart-videos: #8a2387;
+  --chart-music: #10b981;
+  --chart-files: #fbbf24;
   --sidebar-bg: #f5f8fc;
-  --sidebar-active: #e4effd;
+  --sidebar-active: var(--accent-soft);
   --border-color: #e5e9f0;
 }
 
@@ -95,4 +103,46 @@ button {
 
 .animate-fade-in {
   animation: fadeIn 0.4s ease forwards;
+}
+
+:root[data-accent-theme="emerald-pine"] {
+  --primary: #047857;
+  --primary-hover: #065f46;
+  --accent-gradient: linear-gradient(135deg, #059669, #064e3b);
+  --accent-soft: #dff7ec;
+  --accent-ring: rgba(4, 120, 87, 0.36);
+  --card-blue: linear-gradient(135deg, #059669, #047857);
+  --card-purple: linear-gradient(135deg, #0f766e, #115e59);
+  --card-green: linear-gradient(135deg, #16a34a, #15803d);
+  --card-orange: linear-gradient(135deg, #84cc16, #4d7c0f);
+  --card-teal: linear-gradient(135deg, #14b8a6, #0f766e);
+  --chart-images: #059669;
+}
+
+:root[data-accent-theme="dark-obsidian"] {
+  --primary: #334155;
+  --primary-hover: #0f172a;
+  --accent-gradient: linear-gradient(135deg, #475569, #020617);
+  --accent-soft: #e2e8f0;
+  --accent-ring: rgba(51, 65, 85, 0.34);
+  --card-blue: linear-gradient(135deg, #475569, #1e293b);
+  --card-purple: linear-gradient(135deg, #52525b, #27272a);
+  --card-green: linear-gradient(135deg, #64748b, #334155);
+  --card-orange: linear-gradient(135deg, #78716c, #44403c);
+  --card-teal: linear-gradient(135deg, #0f766e, #134e4a);
+  --chart-images: #475569;
+}
+
+:root[data-accent-theme="solarized-bronze"] {
+  --primary: #b45309;
+  --primary-hover: #92400e;
+  --accent-gradient: linear-gradient(135deg, #d97706, #78350f);
+  --accent-soft: #fef3c7;
+  --accent-ring: rgba(180, 83, 9, 0.34);
+  --card-blue: linear-gradient(135deg, #d97706, #92400e);
+  --card-purple: linear-gradient(135deg, #a16207, #713f12);
+  --card-green: linear-gradient(135deg, #65a30d, #3f6212);
+  --card-orange: linear-gradient(135deg, #f59e0b, #b45309);
+  --card-teal: linear-gradient(135deg, #0d9488, #115e59);
+  --chart-images: #d97706;
 }

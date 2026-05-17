@@ -17,6 +17,7 @@ import base64
 import json
 import time
 import secrets
+import subprocess
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "stats.db")
@@ -90,6 +91,13 @@ def safe_child_path(parent: str, name: str) -> str:
         raise HTTPException(status_code=400, detail="Invalid file or folder name")
     return resolve_storage_path(os.path.join(parent, name))
 
+def safe_relative_upload_path(parent: str, relative_path: str) -> str:
+    cleaned = (relative_path or "").replace("\\", "/").strip("/")
+    parts = [part for part in cleaned.split("/") if part]
+    if not parts or any(part in {".", ".."} or os.path.basename(part) != part for part in parts):
+        raise HTTPException(status_code=400, detail="Invalid upload path")
+    return resolve_storage_path(os.path.join(parent, *parts))
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(os.path.join(os.path.dirname(__file__), "..", "data", "thumbnails"), exist_ok=True)
@@ -113,6 +121,55 @@ async def lifespan(app: FastAPI):
                 display_name TEXT NOT NULL
             )
         ''')
+
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS trash_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_path TEXT NOT NULL,
+                trash_path TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                size_bytes INTEGER,
+                deleted_by TEXT NOT NULL,
+                deleted_at TEXT NOT NULL
+            )
+        ''')
+
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS share_links (
+                token TEXT PRIMARY KEY,
+                path TEXT NOT NULL,
+                name TEXT NOT NULL,
+                expires_at REAL,
+                created_by TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+        ''')
+
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS activity_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                path TEXT,
+                actor TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                details TEXT
+            )
+        ''')
+
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS file_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL,
+                username TEXT NOT NULL,
+                permission TEXT NOT NULL DEFAULT 'full',
+                granted_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(path, username)
+            )
+        ''')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_file_permissions_username ON file_permissions(username)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_file_permissions_path ON file_permissions(path)')
         
         cursor = await db.execute("SELECT COUNT(*) FROM users")
         row = await cursor.fetchone()
@@ -135,6 +192,13 @@ async def lifespan(app: FastAPI):
             INSERT OR IGNORE INTO favorites (path, type, name) 
             VALUES ('/mnt/Drive1', 'Folder', 'Drive1')
         ''')
+        await db.execute('''
+            INSERT OR IGNORE INTO file_permissions (path, username, permission, granted_by, created_at)
+            SELECT f.filepath, u.username, 'full', 'system_migration', ?
+            FROM files f
+            CROSS JOIN users u
+            WHERE u.role != 'admin'
+        ''', (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),))
         await db.commit()
     yield
 
@@ -177,6 +241,53 @@ class BulkDeleteRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+class UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "user"
+    display_name: str
+
+class PasswordChangeRequest(BaseModel):
+    username: str
+    new_password: str
+
+class FileOperationRequest(BaseModel):
+    source_path: str
+    target_dir: str
+    new_name: str | None = None
+
+class ShareCreateRequest(BaseModel):
+    path: str
+    expires_hours: int | None = 24
+
+def require_admin(user: dict):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+def get_item_type(path: str) -> str:
+    if os.path.isdir(path):
+        return "Folder"
+    ext = os.path.splitext(path)[1].lower().replace(".", "")
+    if ext in IMAGE_EXTENSIONS:
+        return "Image"
+    if ext in VIDEO_EXTENSIONS:
+        return "Video"
+    if ext in MUSIC_EXTENSIONS:
+        return "Music"
+    if ext in PDF_EXTENSIONS:
+        return "PDF"
+    if ext in TEXT_EXTENSIONS:
+        return "Text"
+    return "File"
+
+async def log_activity(action: str, path: str | None, actor: str, details: str | None = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            'INSERT INTO activity_log (action, path, actor, created_at, details) VALUES (?, ?, ?, ?, ?)',
+            (action, path, actor, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), details)
+        )
+        await db.commit()
 
 @app.post("/api/auth/login")
 async def login(req: LoginRequest):
@@ -453,24 +564,31 @@ async def delete_file(req: DeleteRequest, user: dict = Depends(get_current_user)
         
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File or folder not found")
+
+    trash_root = os.path.join(STORAGE_ROOT, ".mycloud_trash")
+    os.makedirs(trash_root, exist_ok=True)
+    name = os.path.basename(path)
+    trash_name = f"{int(time.time())}_{secrets.token_hex(4)}_{name}"
+    trash_path = os.path.join(trash_root, trash_name)
+    item_type = get_item_type(path)
+    size_bytes = os.path.getsize(path) if os.path.isfile(path) else 0
         
     try:
-        if os.path.isdir(path):
-            shutil.rmtree(path)
-        else:
-            os.remove(path)
+        shutil.move(path, trash_path)
     except OSError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete on disk: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to move item to trash: {str(e)}")
         
-    # Update DB references
     async with aiosqlite.connect(DB_PATH) as db:
-        # Delete from favorites
+        await db.execute('''
+            INSERT INTO trash_items (original_path, trash_path, name, type, size_bytes, deleted_by, deleted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (path, trash_path, name, item_type, size_bytes, user["username"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         await db.execute('DELETE FROM favorites WHERE path = ? OR path LIKE ?', (path, path + '/%'))
-        # Delete from files index
         await db.execute('DELETE FROM files WHERE filepath = ? OR filepath LIKE ?', (path, path + '/%'))
         await db.commit()
+    await log_activity("trash", path, user["username"], trash_path)
         
-    return {"status": "success"}
+    return {"status": "trashed", "trash_path": trash_path}
 
 @app.get("/api/files/raw")
 async def get_raw_file(path: str, user: dict = Depends(get_current_user)):
@@ -505,21 +623,73 @@ async def create_directory(req: MkdirRequest, user: dict = Depends(get_current_u
         
     try:
         os.makedirs(target_dir, exist_ok=True)
+        mod_time = datetime.fromtimestamp(os.stat(target_dir).st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
+                VALUES (?, ?, 'directory', 0, ?)
+            ''', (req.folder_name, target_dir, mod_time))
+            if user.get("role") != "admin":
+                await db.execute('''
+                    INSERT OR REPLACE INTO file_permissions (path, username, permission, granted_by, created_at)
+                    VALUES (?, ?, 'full', ?, ?)
+                ''', (target_dir, user["username"], user["username"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            await db.commit()
         return {"status": "success", "path": target_dir}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/files/upload")
-async def upload_file(path: str = Form(...), file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+async def upload_file(
+    path: str = Form(...),
+    file: UploadFile = File(...),
+    relative_path: str | None = Form(default=None),
+    user: dict = Depends(get_current_user)
+):
     path = resolve_storage_path(path)
         
     if not os.path.exists(path) or not os.path.isdir(path):
         raise HTTPException(status_code=400, detail="Target path is not a directory")
-        
-    safe_filename = os.path.basename(file.filename or "")
-    target_filepath = safe_child_path(path, safe_filename)
+
+    upload_path = relative_path or file.filename or ""
+    if "/" in upload_path or "\\" in upload_path:
+        target_filepath = safe_relative_upload_path(path, upload_path)
+    else:
+        safe_filename = os.path.basename(upload_path)
+        target_filepath = safe_child_path(path, safe_filename)
+    safe_filename = os.path.basename(target_filepath)
+    created_dirs = []
+    parent_dir = os.path.dirname(target_filepath)
     
     try:
+        if parent_dir != path:
+            cursor = parent_dir
+            stack = []
+            while os.path.commonpath([path, cursor]) == path and cursor != path:
+                stack.append(cursor)
+                cursor = os.path.dirname(cursor)
+            for folder_path in reversed(stack):
+                if not os.path.exists(folder_path):
+                    os.makedirs(folder_path, exist_ok=True)
+                    created_dirs.append(folder_path)
+                elif not os.path.isdir(folder_path):
+                    trash_root = os.path.join(STORAGE_ROOT, ".mycloud_trash")
+                    os.makedirs(trash_root, exist_ok=True)
+                    conflict_name = os.path.basename(folder_path)
+                    trash_path = os.path.join(trash_root, f"{int(time.time())}_{secrets.token_hex(4)}_{conflict_name}")
+                    shutil.move(folder_path, trash_path)
+                    os.makedirs(folder_path, exist_ok=True)
+                    created_dirs.append(folder_path)
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        await db.execute('''
+                            INSERT INTO trash_items (original_path, trash_path, name, type, size_bytes, deleted_by, deleted_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', (folder_path, trash_path, conflict_name, get_item_type(trash_path), os.path.getsize(trash_path) if os.path.isfile(trash_path) else 0, user["username"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                        await db.execute('DELETE FROM files WHERE filepath = ?', (folder_path,))
+                        await db.commit()
+        else:
+            os.makedirs(parent_dir, exist_ok=True)
+
         with open(target_filepath, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
@@ -527,15 +697,36 @@ async def upload_file(path: str = Form(...), file: UploadFile = File(...), user:
         size = stat_info.st_size
         mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         ext = os.path.splitext(safe_filename)[1].lower().replace(".", "")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         async with aiosqlite.connect(DB_PATH) as db:
+            for folder_path in created_dirs:
+                folder_stat = os.stat(folder_path)
+                folder_mod_time = datetime.fromtimestamp(folder_stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                await db.execute('''
+                    INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
+                    VALUES (?, ?, 'directory', 0, ?)
+                ''', (os.path.basename(folder_path), folder_path, folder_mod_time))
+                if user.get("role") != "admin":
+                    await db.execute('''
+                        INSERT OR REPLACE INTO file_permissions (path, username, permission, granted_by, created_at)
+                        VALUES (?, ?, 'full', ?, ?)
+                    ''', (folder_path, user["username"], user["username"], now))
+
             await db.execute('''
                 INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
                 VALUES (?, ?, ?, ?, ?)
             ''', (safe_filename, target_filepath, ext, size, mod_time))
+            if user.get("role") != "admin":
+                await db.execute('''
+                    INSERT OR REPLACE INTO file_permissions (path, username, permission, granted_by, created_at)
+                    VALUES (?, ?, 'full', ?, ?)
+                ''', (target_filepath, user["username"], user["username"], now))
             await db.commit()
             
         return {"status": "success", "filepath": target_filepath}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -659,6 +850,8 @@ async def bulk_favorite(req: BulkFavoriteRequest, user: dict = Depends(get_curre
 
 @app.post("/api/files/bulk-delete")
 async def bulk_delete(req: BulkDeleteRequest, user: dict = Depends(get_current_user)):
+    trash_root = os.path.join(STORAGE_ROOT, ".mycloud_trash")
+    os.makedirs(trash_root, exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         deleted_count = 0
         for path in req.paths:
@@ -668,19 +861,25 @@ async def bulk_delete(req: BulkDeleteRequest, user: dict = Depends(get_current_u
                 continue
             if os.path.exists(path):
                 try:
-                    if os.path.isdir(path):
-                        shutil.rmtree(path)
-                    else:
-                        os.remove(path)
-                    
+                    name = os.path.basename(path)
+                    trash_name = f"{int(time.time())}_{secrets.token_hex(4)}_{name}"
+                    trash_path = os.path.join(trash_root, trash_name)
+                    item_type = get_item_type(path)
+                    size_bytes = os.path.getsize(path) if os.path.isfile(path) else 0
+                    shutil.move(path, trash_path)
+                    await db.execute('''
+                        INSERT INTO trash_items (original_path, trash_path, name, type, size_bytes, deleted_by, deleted_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (path, trash_path, name, item_type, size_bytes, user["username"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                     await db.execute('DELETE FROM files WHERE filepath = ? OR filepath LIKE ?', (path, path + '/%'))
                     await db.execute('DELETE FROM favorites WHERE path = ? OR path LIKE ?', (path, path + '/%'))
                     deleted_count += 1
                 except Exception as e:
-                    print(f"Error deleting {path}: {e}")
+                    print(f"Error moving {path} to trash: {e}")
                     
         await db.commit()
-    return {"status": "success", "count": deleted_count}
+    await log_activity("bulk_trash", None, user["username"], f"{deleted_count} items")
+    return {"status": "trashed", "count": deleted_count}
 
 @app.post("/api/files/bulk-download")
 async def bulk_download(req: BulkDeleteRequest, user: dict = Depends(get_current_user)):
@@ -708,6 +907,187 @@ async def bulk_download(req: BulkDeleteRequest, user: dict = Depends(get_current
         "Content-Disposition": "attachment; filename=mycloud_archive.zip"
     }
     return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
+
+
+@app.get("/api/admin/users")
+async def list_users(user: dict = Depends(get_current_user)):
+    require_admin(user)
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = await (await db.execute('SELECT username, role, display_name FROM users ORDER BY username')).fetchall()
+    return {"users": [dict(row) for row in rows]}
+
+@app.post("/api/admin/users")
+async def create_user(req: UserCreateRequest, user: dict = Depends(get_current_user)):
+    require_admin(user)
+    if req.role not in {"admin", "user"}:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    hashed, salt = hash_password(req.password)
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('INSERT INTO users (username, password_hash, salt, role, display_name) VALUES (?, ?, ?, ?, ?)', (req.username, hashed, salt, req.role, req.display_name))
+            await db.commit()
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    await log_activity("user_create", req.username, user["username"], req.role)
+    return {"status": "success"}
+
+@app.post("/api/admin/users/password")
+async def change_user_password(req: PasswordChangeRequest, user: dict = Depends(get_current_user)):
+    require_admin(user)
+    hashed, salt = hash_password(req.new_password)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('UPDATE users SET password_hash = ?, salt = ? WHERE username = ?', (hashed, salt, req.username))
+        await db.commit()
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    await log_activity("password_change", req.username, user["username"])
+    return {"status": "success"}
+
+@app.delete("/api/admin/users/{username}")
+async def delete_user(username: str, user: dict = Depends(get_current_user)):
+    require_admin(user)
+    if username == user["username"]:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('DELETE FROM users WHERE username = ?', (username,))
+        await db.commit()
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    await log_activity("user_delete", username, user["username"])
+    return {"status": "success"}
+
+@app.get("/api/files/details")
+async def file_details(path: str, user: dict = Depends(get_current_user)):
+    path = resolve_storage_path(path)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Item not found")
+    stat = os.stat(path)
+    return {
+        "name": os.path.basename(path),
+        "path": path,
+        "type": get_item_type(path),
+        "size": stat.st_size,
+        "modified": stat.st_mtime * 1000,
+        "is_directory": os.path.isdir(path)
+    }
+
+@app.post("/api/files/copy")
+async def copy_item(req: FileOperationRequest, user: dict = Depends(get_current_user)):
+    source = resolve_storage_path(req.source_path)
+    target_dir = resolve_storage_path(req.target_dir)
+    if not os.path.isdir(target_dir):
+        raise HTTPException(status_code=400, detail="Target must be a folder")
+    target = safe_child_path(target_dir, req.new_name or os.path.basename(source))
+    if os.path.exists(target):
+        raise HTTPException(status_code=400, detail="Target already exists")
+    if os.path.isdir(source):
+        shutil.copytree(source, target)
+    else:
+        shutil.copy2(source, target)
+    await log_activity("copy", source, user["username"], target)
+    return {"status": "success", "path": target}
+
+@app.post("/api/files/move")
+async def move_item(req: FileOperationRequest, user: dict = Depends(get_current_user)):
+    source = resolve_storage_path(req.source_path)
+    target_dir = resolve_storage_path(req.target_dir)
+    if not os.path.isdir(target_dir):
+        raise HTTPException(status_code=400, detail="Target must be a folder")
+    target = safe_child_path(target_dir, req.new_name or os.path.basename(source))
+    if os.path.exists(target):
+        raise HTTPException(status_code=400, detail="Target already exists")
+    shutil.move(source, target)
+    await log_activity("move", source, user["username"], target)
+    return {"status": "success", "path": target}
+
+@app.get("/api/trash")
+async def list_trash(user: dict = Depends(get_current_user)):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = await (await db.execute('SELECT id, original_path, name, type, size_bytes, deleted_by, deleted_at FROM trash_items ORDER BY id DESC')).fetchall()
+    return {"trash": [dict(row) for row in rows]}
+
+@app.post("/api/trash/{item_id}/restore")
+async def restore_trash(item_id: int, user: dict = Depends(get_current_user)):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        row = await (await db.execute('SELECT * FROM trash_items WHERE id = ?', (item_id,))).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Trash item not found")
+        restore_path = row["original_path"]
+        if os.path.exists(restore_path):
+            restore_path = os.path.join(os.path.dirname(restore_path), f"restored_{int(time.time())}_{row['name']}")
+        os.makedirs(os.path.dirname(restore_path), exist_ok=True)
+        shutil.move(row["trash_path"], restore_path)
+        await db.execute('DELETE FROM trash_items WHERE id = ?', (item_id,))
+        await db.commit()
+    await log_activity("restore", restore_path, user["username"])
+    return {"status": "success", "path": restore_path}
+
+@app.delete("/api/trash/{item_id}")
+async def permanently_delete_trash(item_id: int, user: dict = Depends(get_current_user)):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        row = await (await db.execute('SELECT * FROM trash_items WHERE id = ?', (item_id,))).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Trash item not found")
+        if os.path.isdir(row["trash_path"]):
+            shutil.rmtree(row["trash_path"], ignore_errors=True)
+        elif os.path.exists(row["trash_path"]):
+            os.remove(row["trash_path"])
+        await db.execute('DELETE FROM trash_items WHERE id = ?', (item_id,))
+        await db.commit()
+    await log_activity("delete_permanent", row["original_path"], user["username"])
+    return {"status": "success"}
+
+@app.post("/api/share")
+async def create_share(req: ShareCreateRequest, user: dict = Depends(get_current_user)):
+    path = resolve_storage_path(req.path)
+    if not os.path.exists(path) or os.path.isdir(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    token = secrets.token_urlsafe(18)
+    expires_at = time.time() + max(req.expires_hours or 24, 1) * 3600
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('INSERT INTO share_links (token, path, name, expires_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)', (token, path, os.path.basename(path), expires_at, user["username"], time.time()))
+        await db.commit()
+    await log_activity("share_create", path, user["username"], token)
+    return {"token": token, "url": f"/api/share/{token}"}
+
+@app.get("/api/share/{token}")
+async def get_shared_file(token: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        row = await (await db.execute('SELECT * FROM share_links WHERE token = ?', (token,))).fetchone()
+    if not row or time.time() > row["expires_at"]:
+        raise HTTPException(status_code=404, detail="Share link not found or expired")
+    return FileResponse(row["path"], filename=row["name"])
+
+@app.get("/api/activity")
+async def activity(user: dict = Depends(get_current_user)):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = await (await db.execute('SELECT action, path, actor, created_at, details FROM activity_log ORDER BY id DESC LIMIT 100')).fetchall()
+    return {"activity": [dict(row) for row in rows]}
+
+@app.get("/api/index/status")
+async def index_status(user: dict = Depends(get_current_user)):
+    script = os.path.join(os.path.dirname(__file__), "..", "scripts", "index_files.py")
+    log_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "indexer_cron.log")
+    db_mtime = os.path.getmtime(DB_PATH) if os.path.exists(DB_PATH) else None
+    return {"database_modified": db_mtime, "script_exists": os.path.exists(script), "log_exists": os.path.exists(log_path)}
+
+@app.post("/api/index/reindex")
+async def reindex(user: dict = Depends(get_current_user)):
+    require_admin(user)
+    script = os.path.join(os.path.dirname(__file__), "..", "scripts", "index_files.py")
+    if not os.path.exists(script):
+        raise HTTPException(status_code=404, detail="Indexer script not found")
+    result = subprocess.run(["python3", script], capture_output=True, text=True, timeout=3600)
+    await log_activity("reindex", STORAGE_ROOT, user["username"], result.stdout[-500:])
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=result.stderr[-1000:] or "Indexer failed")
+    return {"status": "success", "output": result.stdout[-2000:]}
 
 
 if __name__ == "__main__":
