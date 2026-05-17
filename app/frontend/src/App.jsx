@@ -38,6 +38,7 @@ function App() {
   const [folderContents, setFolderContents] = useState([]);
   const [loadingFolder, setLoadingFolder] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
+  const [recentViewMode, setRecentViewMode] = useState('list');
   const [activeModal, setActiveModal] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [renameInput, setRenameInput] = useState('');
@@ -950,51 +951,106 @@ function App() {
 
         <div className="section-header">
           <span>RECENT ACTIVITY</span>
+          <div className="recent-view-toggle desktop-only" style={{ display: 'flex', alignItems: 'center' }}>
+            <button 
+              className={`btn-icon ${recentViewMode === 'grid' ? 'active' : ''}`} 
+              onClick={() => setRecentViewMode('grid')}
+              style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+            >
+              <LayoutGrid size={16} />
+            </button>
+            <button 
+              className={`btn-icon ${recentViewMode === 'list' ? 'active' : ''}`} 
+              onClick={() => setRecentViewMode('list')}
+              style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
+            >
+              <List size={16} />
+            </button>
+          </div>
         </div>
         
-        <table className="recent-activity-table animate-fade-in" style={{ animationDelay: '0.5s' }}>
-          <thead>
-            <tr>
-              <th>NAME</th>
-              <th>TYPE</th>
-              <th>SIZE</th>
-              <th>MODIFIED</th>
-            </tr>
-          </thead>
-          <tbody>
+        <div className={`recent-activity-container mode-${recentViewMode}`}>
+          {/* List/Table Format */}
+          <div className="recent-list-view">
+            <table className="recent-activity-table animate-fade-in" style={{ animationDelay: '0.5s' }}>
+              <thead>
+                <tr>
+                  <th>NAME</th>
+                  <th>TYPE</th>
+                  <th>SIZE</th>
+                  <th>MODIFIED</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan="4" className="empty-state">Loading...</td></tr>
+                ) : recent.length > 0 ? (
+                  recent.map((item, index) => {
+                    return (
+                      <tr key={index} className="recent-row">
+                        <td>
+                          <div className="name-cell" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {item.type === 'Folder' ? (
+                              <Folder size={18} color="#3a7bd5" style={{ flexShrink: 0 }} />
+                            ) : item.type === 'Image' ? (
+                              <ImageIcon size={18} color="#9b59b6" style={{ flexShrink: 0 }} />
+                            ) : item.type === 'Video' ? (
+                              <Video size={18} color="#e74c3c" style={{ flexShrink: 0 }} />
+                            ) : item.type === 'Music' ? (
+                              <Music size={18} color="#2ecc71" style={{ flexShrink: 0 }} />
+                            ) : (
+                              <FileText size={18} color="#94a3b8" style={{ flexShrink: 0 }} />
+                            )}
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+                          </div>
+                        </td>
+                        <td>{item.type}</td>
+                        <td>{formatSize(item.size)}</td>
+                        <td>{new Date(item.modified).toLocaleDateString()}</td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr><td colSpan="4" className="empty-state">No items found</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Tile/Grid Format */}
+          <div className="recent-grid-view animate-fade-in">
             {loading ? (
-              <tr><td colSpan="4" className="empty-state">Loading...</td></tr>
+              <div className="empty-state">Loading...</div>
             ) : recent.length > 0 ? (
-              recent.map((item, index) => {
-                return (
-                  <tr key={index} className="recent-row">
-                    <td>
-                      <div className="name-cell" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {item.type === 'Folder' ? (
-                          <Folder size={18} color="#3a7bd5" style={{ flexShrink: 0 }} />
-                        ) : item.type === 'Image' ? (
-                          <ImageIcon size={18} color="#9b59b6" style={{ flexShrink: 0 }} />
-                        ) : item.type === 'Video' ? (
-                          <Video size={18} color="#e74c3c" style={{ flexShrink: 0 }} />
-                        ) : item.type === 'Music' ? (
-                          <Music size={18} color="#2ecc71" style={{ flexShrink: 0 }} />
-                        ) : (
-                          <FileText size={18} color="#94a3b8" style={{ flexShrink: 0 }} />
-                        )}
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
-                      </div>
-                    </td>
-                    <td>{item.type}</td>
-                    <td>{formatSize(item.size)}</td>
-                    <td>{new Date(item.modified).toLocaleDateString()}</td>
-                  </tr>
-                );
-              })
+              <div className="recent-grid">
+                {recent.map((item, index) => (
+                  <div key={index} className="recent-grid-card">
+                    <div className="recent-card-icon-wrapper">
+                      {item.type === 'Folder' ? (
+                        <Folder size={24} color="#3a7bd5" />
+                      ) : item.type === 'Image' ? (
+                        <ImageIcon size={24} color="#9b59b6" />
+                      ) : item.type === 'Video' ? (
+                        <Video size={24} color="#e74c3c" />
+                      ) : item.type === 'Music' ? (
+                        <Music size={24} color="#2ecc71" />
+                      ) : (
+                        <FileText size={24} color="#94a3b8" />
+                      )}
+                    </div>
+                    <div className="recent-card-details">
+                      <span className="recent-card-name" title={item.name}>{item.name}</span>
+                      <span className="recent-card-meta">{item.type} • {formatSize(item.size)}</span>
+                      <span className="recent-card-date">{new Date(item.modified).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <tr><td colSpan="4" className="empty-state">No items found</td></tr>
+              <div className="empty-state">No items found</div>
             )}
-          </tbody>
-        </table>
+          </div>
+        </div>
           </>
         ) : (
           <div className="file-manager-view animate-fade-in">

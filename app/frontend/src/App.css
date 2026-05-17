@@ -2104,7 +2104,9 @@
 
   .mobile-menu-trigger {
     display: flex !important;
-    margin-right: 12px;
+    margin-right: 4px !important;
+    padding: 6px !important;
+    flex-shrink: 0 !important;
   }
 
   .main-content {
@@ -2112,8 +2114,34 @@
   }
 
   .header {
-    margin-bottom: 24px !important;
-    gap: 12px;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    margin-bottom: 20px !important;
+    width: 100% !important;
+  }
+
+  .search-bar-container {
+    flex: 1 !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+
+  .search-bar {
+    padding: 8px 14px !important;
+    border-radius: 18px !important;
+    width: 100% !important;
+  }
+
+  .search-bar input {
+    font-size: 0.8rem !important;
+  }
+
+  .header-actions {
+    gap: 8px !important;
+    flex-shrink: 0 !important;
   }
 
   /* Premium Swipeable Stats Cards Carousel */
@@ -2177,6 +2205,79 @@
 
   .folder-card .folder-info p {
     font-size: 0.55rem !important;
+  }
+
+  /* Sleek Responsive Grid Cards for File Manager on Mobile */
+  .fm-grid {
+    grid-template-columns: repeat(auto-fill, minmax(95px, 1fr)) !important;
+    gap: 8px !important;
+    padding: 4px !important;
+  }
+
+  .fm-item {
+    padding: 8px !important;
+    border-radius: 10px !important;
+    background: white !important;
+    border: 1px solid var(--border-color) !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.02) !important;
+  }
+
+  .fm-thumbnail-container {
+    width: 54px !important;
+    height: 54px !important;
+    margin-bottom: 6px !important;
+    border-radius: 6px !important;
+  }
+
+  .fm-icon-container {
+    width: 54px !important;
+    height: 54px !important;
+    margin-bottom: 6px !important;
+  }
+
+  .fm-icon-container svg {
+    width: 24px !important;
+    height: 24px !important;
+  }
+
+  .fm-item-name {
+    font-size: 0.68rem !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .fm-actions-overlay {
+    opacity: 1 !important;
+    top: 4px !important;
+    right: 4px !important;
+    gap: 2px !important;
+  }
+
+  .fm-actions-overlay .action-btn {
+    width: 20px !important;
+    height: 20px !important;
+    padding: 0 !important;
+    border-radius: 6px !important;
+    background: rgba(255, 255, 255, 0.92) !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  .fm-actions-overlay .action-btn svg {
+    width: 10px !important;
+    height: 10px !important;
+  }
+
+  .fm-grid-checkbox {
+    width: 18px !important;
+    height: 18px !important;
+    top: 4px !important;
+    left: 4px !important;
   }
 
   /* Convert Desktop Tables to Sleek Responsive Cards List on Mobile */
@@ -2395,6 +2496,137 @@
     background: rgba(58, 123, 213, 0.08);
     color: var(--primary);
   }
+
+  /* Mobile-only recent activity layouts */
+  .recent-view-toggle.desktop-only {
+    display: none !important;
+  }
+
+  .recent-activity-container .recent-grid-view {
+    display: block !important;
+  }
+
+  .recent-activity-container .recent-list-view {
+    display: none !important;
+  }
+
+  .recent-grid {
+    grid-template-columns: repeat(auto-fill, minmax(95px, 1fr)) !important;
+    gap: 6px !important;
+    margin-top: 8px !important;
+  }
+
+  .recent-grid-card {
+    padding: 8px !important;
+    border-radius: 10px !important;
+    gap: 6px !important;
+  }
+
+  .recent-card-icon-wrapper {
+    width: 30px !important;
+    height: 30px !important;
+    border-radius: 6px !important;
+  }
+
+  .recent-card-icon-wrapper svg {
+    width: 15px !important;
+    height: 15px !important;
+  }
+
+  .recent-card-name {
+    font-size: 0.68rem !important;
+  }
+
+  .recent-card-meta {
+    font-size: 0.58rem !important;
+  }
+
+  .recent-card-date {
+    display: none !important;
+  }
+}
+
+/* Desktop Dual-mode switching styles for Recent Activity */
+@media (min-width: 769px) {
+  .recent-activity-container.mode-grid .recent-grid-view {
+    display: block !important;
+  }
+
+  .recent-activity-container.mode-grid .recent-list-view {
+    display: none !important;
+  }
+
+  .recent-activity-container.mode-list .recent-grid-view {
+    display: none !important;
+  }
+
+  .recent-activity-container.mode-list .recent-list-view {
+    display: block !important;
+  }
+}
+
+.recent-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)) !important;
+  gap: 16px !important;
+  margin-top: 16px !important;
+  box-sizing: border-box;
+}
+
+.recent-grid-card {
+  background: white !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 16px !important;
+  padding: 14px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.02) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+  cursor: pointer !important;
+  box-sizing: border-box;
+}
+
+.recent-grid-card:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06) !important;
+}
+
+.recent-card-icon-wrapper {
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 12px !important;
+  background: var(--bg-main) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+}
+
+.recent-card-details {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+}
+
+.recent-card-name {
+  font-size: 0.85rem !important;
+  font-weight: 600 !important;
+  color: var(--text-main) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.recent-card-meta {
+  font-size: 0.75rem !important;
+  color: var(--text-muted) !important;
+}
+
+.recent-card-date {
+  font-size: 0.7rem !important;
+  color: var(--text-muted) !important;
+  opacity: 0.8 !important;
 }
 
 
