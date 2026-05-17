@@ -1363,6 +1363,35 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Mobile Floating Action Button (FAB) */}
+      <div className="mobile-fab-container">
+        <button 
+          className={`mobile-fab ${activeModal === 'fabMenu' ? 'active' : ''}`}
+          onClick={() => setActiveModal(activeModal === 'fabMenu' ? null : 'fabMenu')}
+          title="Add Actions"
+        >
+          <Plus size={24} style={{ transform: activeModal === 'fabMenu' ? 'rotate(45deg)' : 'none', transition: 'transform 0.2s ease' }} />
+        </button>
+        {activeModal === 'fabMenu' && (
+          <div className="mobile-fab-menu glass animate-scale-up">
+            <button 
+              className="fab-menu-item" 
+              onClick={() => { setActiveModal('newFolder'); }}
+            >
+              <Folder size={18} />
+              <span>New Folder</span>
+            </button>
+            <button 
+              className="fab-menu-item" 
+              onClick={() => { setActiveModal('uploadCenter'); }}
+            >
+              <CloudUpload size={18} />
+              <span>Upload Files</span>
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
