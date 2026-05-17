@@ -65,6 +65,7 @@ function App() {
   
   const [selectedPaths, setSelectedPaths] = useState([]);
   const [swipedRecentIndex, setSwipedRecentIndex] = useState(null);
+  const [mobileActiveItem, setMobileActiveItem] = useState(null);
   const touchStartX = useRef(0);
   const touchCurrentX = useRef(0);
 
@@ -1115,6 +1116,12 @@ function App() {
                             <Trash2 size={14} />
                           </button>
                         </div>
+                        <button 
+                          className="mobile-item-options-btn"
+                          onClick={(e) => { e.stopPropagation(); setMobileActiveItem(item); }}
+                        >
+                          <MoreVertical size={14} />
+                        </button>
                         
                         {item.type === 'Image' ? (
                           <div className="fm-thumbnail-container">
@@ -1195,14 +1202,22 @@ function App() {
                             <td>{new Date(item.modified).toLocaleDateString()}</td>
                             <td>
                               <div className="fm-list-actions">
-                                <button className={`action-btn star ${item.is_favorite ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFavorite(item, false); }}>
-                                  <Star size={14} />
-                                </button>
-                                <button className="action-btn edit" onClick={(e) => { e.stopPropagation(); handleRenameClick(item); }}>
-                                  <Edit3 size={14} />
-                                </button>
-                                <button className="action-btn delete" onClick={(e) => { e.stopPropagation(); handleDeleteClick(item); }}>
-                                  <Trash2 size={14} />
+                                <div className="fm-list-actions-desktop">
+                                  <button className={`action-btn star ${item.is_favorite ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFavorite(item, false); }}>
+                                    <Star size={14} />
+                                  </button>
+                                  <button className="action-btn edit" onClick={(e) => { e.stopPropagation(); handleRenameClick(item); }}>
+                                    <Edit3 size={14} />
+                                  </button>
+                                  <button className="action-btn delete" onClick={(e) => { e.stopPropagation(); handleDeleteClick(item); }}>
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                                <button 
+                                  className="mobile-item-options-btn"
+                                  onClick={(e) => { e.stopPropagation(); setMobileActiveItem(item); }}
+                                >
+                                  <MoreVertical size={14} />
                                 </button>
                               </div>
                             </td>
@@ -1480,6 +1495,81 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* Modern Blurred Mobile Options Bottom Sheet */}
+      {mobileActiveItem && (
+        <>
+          <div className="mobile-sheet-backdrop" onClick={() => setMobileActiveItem(null)} />
+          <div className="mobile-bottom-sheet glass">
+            <div className="mobile-sheet-header">
+              <div className="mobile-sheet-icon-wrapper">
+                {mobileActiveItem.type === 'Folder' ? <Folder size={20} color="#3a7bd5" /> :
+                 mobileActiveItem.type === 'Image' ? <ImageIcon size={20} color="#3a7bd5" /> :
+                 mobileActiveItem.type === 'Video' ? <Video size={20} color="#8a2387" /> :
+                 mobileActiveItem.type === 'Music' ? <Music size={20} color="#10b981" /> :
+                 <FileText size={20} color="#94a3b8" />}
+              </div>
+              <div className="mobile-sheet-title-info">
+                <span className="mobile-sheet-name">{mobileActiveItem.name}</span>
+                <span className="mobile-sheet-meta">{mobileActiveItem.type === 'Folder' ? 'Folder' : formatSize(mobileActiveItem.size)}</span>
+              </div>
+            </div>
+            
+            <div className="mobile-sheet-actions">
+              <button 
+                className="mobile-sheet-action-btn"
+                onClick={() => {
+                  toggleFavorite(mobileActiveItem, false);
+                  setMobileActiveItem(null);
+                }}
+              >
+                <Star size={16} className={mobileActiveItem.is_favorite ? 'active' : ''} style={{ color: mobileActiveItem.is_favorite ? '#fbbf24' : '#64748b' }} />
+                <span>{mobileActiveItem.is_favorite ? 'Remove from Favorites' : 'Add to Favorites'}</span>
+              </button>
+              
+              <button 
+                className="mobile-sheet-action-btn"
+                onClick={() => {
+                  handleRenameClick(mobileActiveItem);
+                  setMobileActiveItem(null);
+                }}
+              >
+                <Edit3 size={16} color="#64748b" />
+                <span>Rename</span>
+              </button>
+
+              {mobileActiveItem.type !== 'Folder' && (
+                <a 
+                  className="mobile-sheet-action-btn"
+                  href={`/api/files/download?path=${encodeURIComponent(mobileActiveItem.path)}`}
+                  onClick={() => setMobileActiveItem(null)}
+                >
+                  <Download size={16} color="#64748b" />
+                  <span>Download File</span>
+                </a>
+              )}
+              
+              <button 
+                className="mobile-sheet-action-btn danger"
+                onClick={() => {
+                  handleDeleteClick(mobileActiveItem);
+                  setMobileActiveItem(null);
+                }}
+              >
+                <Trash2 size={16} color="#ef4444" />
+                <span>Delete</span>
+              </button>
+            </div>
+
+            <button 
+              className="mobile-sheet-cancel-btn"
+              onClick={() => setMobileActiveItem(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
 
     </div>
   );
