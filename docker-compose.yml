@@ -12,6 +12,12 @@ services:
       - /mnt/Drive1:/mnt/Drive1
     expose:
       - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5).read()\""]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   frontend:
     build:
@@ -22,3 +28,9 @@ services:
       - backend
     ports:
       - "3000:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/api/health >/dev/null"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 30s

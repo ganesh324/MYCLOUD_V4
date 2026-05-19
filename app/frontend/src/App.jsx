@@ -46,6 +46,7 @@ function App() {
   });
   const [recent, setRecent] = useState([]);
   const [favorites, setFavorites] = useState([]);
+  const [dashboardHealth, setDashboardHealth] = useState({ health: null, index: null });
   const [loading, setLoading] = useState(true);
   const [currentView, setCurrentView] = useState('dashboard');
   const [currentPath, setCurrentPath] = useState('/mnt/Drive1');
@@ -79,6 +80,7 @@ function App() {
   const [loadingCategory, setLoadingCategory] = useState(false);
   
   const [selectedPaths, setSelectedPaths] = useState([]);
+  const [inspectorItem, setInspectorItem] = useState(null);
   const [mobileActiveItem, setMobileActiveItem] = useState(null);
   const [sortBy, setSortBy] = useState('name');
   const [typeFilter, setTypeFilter] = useState('All');
@@ -88,6 +90,8 @@ function App() {
   const openFolder = async (path) => {
     setCurrentView('fileManager');
     setCurrentPath(path);
+    setInspectorItem(null);
+    setSelectedPaths([]);
     setLoadingFolder(true);
     try {
       const res = await fetch(`/api/files/list?path=${encodeURIComponent(path)}`);
@@ -118,18 +122,23 @@ function App() {
 
   const fetchStats = async () => {
     try {
-      const [statsRes, recentRes, favRes] = await Promise.all([
+      const [statsRes, recentRes, favRes, healthRes, indexRes] = await Promise.all([
         fetch('/api/stats'),
         fetch('/api/recent'),
-        fetch('/api/favorites')
+        fetch('/api/favorites'),
+        fetch('/api/health'),
+        fetch('/api/index/status')
       ]);
       const statsData = await statsRes.json();
       const recentData = await recentRes.json();
       const favData = await favRes.json();
+      const healthData = healthRes.ok ? await healthRes.json() : null;
+      const indexData = indexRes.ok ? await indexRes.json() : null;
       
       setStats(statsData);
       setRecent(recentData.recent || []);
       setFavorites(favData.favorites || []);
+      setDashboardHealth({ health: healthData, index: indexData });
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
@@ -338,7 +347,7 @@ function App() {
       if (entry.isDirectory) {
         const reader = entry.createReader();
         const children = [];
-        let batch = [];
+        let batch;
         do {
           batch = await readDirectory(reader);
           children.push(...batch);
@@ -469,7 +478,10 @@ function App() {
 
   const handleItemContextMenu = (e, item) => {
     e.preventDefault();
-    setMobileActiveItem(item);
+    setInspectorItem(item);
+    if (window.matchMedia('(max-width: 768px)').matches) {
+      setMobileActiveItem(item);
+    }
   };
 
   const toggleSelectItem = (path, e) => {
@@ -657,12 +669,25 @@ ${url}`);
   };
 
   const formatSize = (bytes) => {
-    if (bytes === 0) return '0 B';
+    if (!bytes) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
+
+  const formatDate = (value) => {
+    if (!value) return 'Unknown';
+    return new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+
+  const pathParts = currentPath.split('/').filter(Boolean);
+  const navigatorItems = pathParts.map((part, idx) => ({
+    name: part,
+    path: '/' + pathParts.slice(0, idx + 1).join('/')
+  }));
+  const childFolders = folderContents.filter(item => item.type === 'Folder');
 
   if (!authChecked) {
     return (
@@ -689,6 +714,24 @@ ${url}`);
       return a.name.localeCompare(b.name);
     });
 
+  const totalIndexedFiles = stats.images + stats.videos + stats.music + stats.files;
+  const storageSegments = [
+    { key: 'images', label: 'Images', value: stats.images, color: '#3a7bd5' },
+    { key: 'videos', label: 'Videos', value: stats.videos, color: '#8a2387' },
+    { key: 'music', label: 'Music', value: stats.music, color: '#10b981' },
+    { key: 'files', label: 'Files', value: stats.files, color: '#f59e0b' }
+  ];
+  const categoryCards = [
+    { label: 'Images', count: stats.images, meta: 'image files', icon: ImageIcon, color: '#3a7bd5', action: () => openCategory('Images') },
+    { label: 'Videos', count: stats.videos, meta: 'video files', icon: Video, color: '#8a2387', action: () => openCategory('Videos') },
+    { label: 'Music', count: stats.music, meta: 'audio files', icon: Music, color: '#10b981', action: () => openCategory('Music') },
+    { label: 'Documents', count: stats.files, meta: 'other files', icon: FileText, color: '#f59e0b', action: () => openCategory('Files') },
+    { label: 'Folders', count: stats.folders, meta: 'folders', icon: Folder, color: '#0f766e', action: () => openFolder('/mnt/Drive1') }
+  ];
+  const lastIndexLabel = dashboardHealth.index?.database_modified
+    ? new Date(dashboardHealth.index.database_modified * 1000).toLocaleString()
+    : 'Unknown';
+
   return (
     <div className={`dashboard ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileMenuOpen ? 'mobile-sidebar-open' : ''}`}>
       {/* Mobile Backdrop */}
@@ -713,6 +756,70 @@ ${url}`);
           </button>
         </div>
 
+        {currentView === 'fileManager' && !sidebarCollapsed ? (
+          <div className="folder-sidebar-workspace explorer-sidebar animate-fade-in">
+            <div className="explorer-header">
+              <span>Explorer</span>
+              <button className="explorer-home-btn" onClick={() => setCurrentView('dashboard')} title="Back to Home">
+                <Home size={15} />
+              </button>
+            </div>
+
+            <div className="explorer-root">
+              <button className="explorer-root-label" onClick={() => openFolder('/mnt/Drive1')} title="Open Drive1">
+                <ChevronRight size={14} />
+                <span>MYCLOUD</span>
+              </button>
+
+              <div className="explorer-tree">
+                {navigatorItems.map((item, idx) => (
+                  <button
+                    key={item.path}
+                    className={`explorer-tree-row ${item.path === currentPath ? 'active' : ''}`}
+                    style={{ paddingLeft: `${8 + idx * 12}px` }}
+                    onClick={() => openFolder(item.path)}
+                    title={item.path}
+                  >
+                    <ChevronRight size={13} className="explorer-caret" />
+                    <Folder size={15} />
+                    <span>{item.name}</span>
+                  </button>
+                ))}
+
+                <div className="explorer-section-label">Current Folder</div>
+                {childFolders.map(folder => (
+                  <button
+                    key={folder.path}
+                    className={`explorer-tree-row child-folder ${inspectorItem?.path === folder.path ? 'selected' : ''}`}
+                    onClick={() => openFolder(folder.path)}
+                    title={folder.path}
+                  >
+                    <ChevronRight size={13} className="explorer-caret muted" />
+                    <Folder size={15} />
+                    <span>{folder.name}</span>
+                  </button>
+                ))}
+                {childFolders.length === 0 && !loadingFolder && (
+                  <div className="explorer-empty">No folders</div>
+                )}
+              </div>
+            </div>
+
+            <div className="explorer-details">
+              <div className="explorer-section-label">Details</div>
+              {inspectorItem ? (
+                <div className="explorer-details-grid">
+                  <div><span>Type</span><strong>{inspectorItem.type}</strong></div>
+                  <div><span>Size</span><strong>{inspectorItem.type === 'Folder' ? '--' : formatSize(inspectorItem.size)}</strong></div>
+                  <div><span>Modified</span><strong>{formatDate(inspectorItem.modified)}</strong></div>
+                </div>
+              ) : (
+                <div className="explorer-details-empty">Select an item</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
         <nav className="nav-menu">
           <div 
             className={`nav-item ${currentView === 'dashboard' ? 'active' : ''}`} 
@@ -749,93 +856,44 @@ ${url}`);
         </nav>
 
         {!sidebarCollapsed && (
-          <div className="storage-widget animate-scale-up">
-            <div style={{ position: 'relative', width: '130px', height: '130px', margin: '0 auto 16px auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="130" height="130" viewBox="0 0 130 130" className="donut-chart">
-                <circle cx="65" cy="65" r="50" fill="none" stroke="#f1f5f9" strokeWidth="10" />
-                
-                {/* Images Circle */}
-                {stats.images > 0 && (
-                  <circle 
-                    cx="65" 
-                    cy="65" 
-                    r="50" 
-                    fill="none" 
-                    stroke="var(--chart-images)" 
-                    strokeWidth="10" 
-                    strokeDasharray={`${((stats.images / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
-                    strokeDashoffset={0}
-                    transform="rotate(-90 65 65)"
-                    style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
-                  />
-                )}
-                
-                {/* Videos Circle */}
-                {stats.videos > 0 && (
-                  <circle 
-                    cx="65" 
-                    cy="65" 
-                    r="50" 
-                    fill="none" 
-                    stroke="#8a2387" 
-                    strokeWidth="10" 
-                    strokeDasharray={`${((stats.videos / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
-                    strokeDashoffset={-((stats.images / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)}
-                    transform="rotate(-90 65 65)"
-                    style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
-                  />
-                )}
-                
-                {/* Music Circle */}
-                {stats.music > 0 && (
-                  <circle 
-                    cx="65" 
-                    cy="65" 
-                    r="50" 
-                    fill="none" 
-                    stroke="#10b981" 
-                    strokeWidth="10" 
-                    strokeDasharray={`${((stats.music / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
-                    strokeDashoffset={-(((stats.images + stats.videos) / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)}
-                    transform="rotate(-90 65 65)"
-                    style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
-                  />
-                )}
-                
-                {/* Files Circle */}
-                {stats.files > 0 && (
-                  <circle 
-                    cx="65" 
-                    cy="65" 
-                    r="50" 
-                    fill="none" 
-                    stroke="#fbbf24" 
-                    strokeWidth="10" 
-                    strokeDasharray={`${((stats.files / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)} ${2 * Math.PI * 50}`} 
-                    strokeDashoffset={-(((stats.images + stats.videos + stats.music) / (stats.images + stats.videos + stats.music + stats.files || 1)) * 2 * Math.PI * 50)}
-                    transform="rotate(-90 65 65)"
-                    style={{ transition: 'stroke-dasharray 0.5s ease', strokeLinecap: 'round' }}
-                  />
-                )}
-                
-                <text x="65" y="62" textAnchor="middle" style={{ fill: 'var(--text-main)', fontSize: '1rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif' }}>
-                  {stats.images + stats.videos + stats.music + stats.files}
-                </text>
-                <text x="65" y="74" textAnchor="middle" style={{ fill: 'var(--text-muted)', fontSize: '0.55rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Files
-                </text>
-              </svg>
+          <div className="storage-widget sidebar-storage-card animate-scale-up">
+            <div className="sidebar-storage-label">Indexed storage</div>
+            <div className="sidebar-storage-size">{formatSize(stats.total_size)}</div>
+            <div className="sidebar-storage-meta">{totalIndexedFiles} files across {stats.folders} folders</div>
+
+            <div className="sidebar-storage-bar" aria-label="Storage distribution by file type">
+              {storageSegments.map(segment => (
+                <span
+                  key={segment.key}
+                  style={{ width: `${Math.max(totalIndexedFiles ? (segment.value / totalIndexedFiles) * 100 : 0, segment.value ? 3 : 0)}%`, background: segment.color }}
+                />
+              ))}
             </div>
-            <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#94a3b8', letterSpacing: '1px', marginBottom: '12px', textTransform: 'uppercase' }}>
-              Storage Distribution
+
+            <div className="sidebar-storage-legend">
+              {storageSegments.map(segment => (
+                <span key={segment.key}><i style={{ background: segment.color }} />{segment.label}</span>
+              ))}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '0.62rem', color: '#64748b' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--chart-images)' }}></div> Images</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#8a2387' }}></div> Videos</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }}></div> Music</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fbbf24' }}></div> Files</span>
+
+            <div className="sidebar-health-list">
+              <div className="sidebar-health-row">
+                <span className={`health-dot ${dashboardHealth.health?.status === 'ok' ? 'ok' : 'warn'}`}></span>
+                <div><strong>Backend</strong><small>{dashboardHealth.health?.status || 'Checking'}</small></div>
+              </div>
+              <div className="sidebar-health-row">
+                <span className={`health-dot ${dashboardHealth.health?.storage_available ? 'ok' : 'danger'}`}></span>
+                <div><strong>Storage</strong><small>{dashboardHealth.health?.storage_available ? 'Drive mounted' : 'Unavailable'}</small></div>
+              </div>
+              <div className="sidebar-health-row">
+                <span className={`health-dot ${dashboardHealth.index?.script_exists ? 'ok' : 'warn'}`}></span>
+                <div><strong>Indexer</strong><small>{lastIndexLabel}</small></div>
+              </div>
             </div>
           </div>
+        )}
+
+          </>
         )}
       </aside>
 
@@ -1053,72 +1111,20 @@ ${url}`);
           </div>
         ) : currentView === 'dashboard' ? (
           <>
-            <div className="section-header mobile-storage-header">
-              <span>STORAGE OVERVIEW</span>
-              <div className="live-stats" onClick={fetchStats}>
-                <div className="live-stats-dot"></div>
-                REFRESH LIVE STATS
-              </div>
+            <div className="dashboard-card-grid animate-fade-in">
+              {categoryCards.map(({ label, count, meta, icon: Icon, color, action }) => (
+                <button key={label} className="dashboard-type-card" onClick={action} style={{ '--type-accent': color }}>
+                  <span className="type-card-accent"></span>
+                  <span className="type-card-icon"><Icon size={18} /></span>
+                  <span className="type-card-copy">
+                    <strong>{label}</strong>
+                    <small>{loading ? 'Loading...' : `${count} ${meta}`}</small>
+                  </span>
+                </button>
+              ))}
             </div>
 
-            <div className="cards-grid animate-fade-in" style={{ marginTop: '16px' }}>
-              <div className="card animate-fade-in" onClick={() => openCategory('Images')} style={{ cursor: 'pointer', background: 'var(--card-blue)', animationDelay: '0s' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, overflow: 'hidden' }}>
-                  <div className="card-icon"><ImageIcon size={20} /></div>
-                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <div className="card-title" style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Images</div>
-                    <div className="card-subtitle" style={{ fontSize: '0.75rem', opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{loading ? 'Loading...' : `${stats.images} files`}</div>
-                  </div>
-                </div>
-                <MoreVertical size={18} className="card-options" style={{ marginLeft: 'auto', flexShrink: 0 }} />
-              </div>
-              
-              <div className="card animate-fade-in" onClick={() => openCategory('Videos')} style={{ cursor: 'pointer', background: 'var(--card-purple)', animationDelay: '0.1s' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, overflow: 'hidden' }}>
-                  <div className="card-icon"><Video size={20} /></div>
-                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <div className="card-title" style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Videos</div>
-                    <div className="card-subtitle" style={{ fontSize: '0.75rem', opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{loading ? 'Loading...' : `${stats.videos} files`}</div>
-                  </div>
-                </div>
-                <MoreVertical size={18} className="card-options" style={{ marginLeft: 'auto', flexShrink: 0 }} />
-              </div>
-
-              <div className="card animate-fade-in" onClick={() => openCategory('Music')} style={{ cursor: 'pointer', background: 'var(--card-green)', animationDelay: '0.2s' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, overflow: 'hidden' }}>
-                  <div className="card-icon"><Music size={20} /></div>
-                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <div className="card-title" style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Music</div>
-                    <div className="card-subtitle" style={{ fontSize: '0.75rem', opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{loading ? 'Loading...' : `${stats.music} files`}</div>
-                  </div>
-                </div>
-                <MoreVertical size={18} className="card-options" style={{ marginLeft: 'auto', flexShrink: 0 }} />
-              </div>
-
-              <div className="card animate-fade-in" onClick={() => openCategory('Files')} style={{ cursor: 'pointer', background: 'var(--card-orange)', animationDelay: '0.3s' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, overflow: 'hidden' }}>
-                  <div className="card-icon"><FileText size={20} /></div>
-                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <div className="card-title" style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Files</div>
-                    <div className="card-subtitle" style={{ fontSize: '0.75rem', opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{loading ? 'Loading...' : `${stats.files} files`}</div>
-                  </div>
-                </div>
-                <MoreVertical size={18} className="card-options" style={{ marginLeft: 'auto', flexShrink: 0 }} />
-              </div>
-
-              <div className="card animate-fade-in" onClick={() => openFolder('/mnt/Drive1')} style={{ cursor: 'pointer', background: 'var(--card-teal)', animationDelay: '0.4s' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, overflow: 'hidden' }}>
-                  <div className="card-icon"><Folder size={20} /></div>
-                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <div className="card-title" style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Folders</div>
-                    <div className="card-subtitle" style={{ fontSize: '0.75rem', opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{loading ? 'Loading...' : `${stats.folders} folders`}</div>
-                  </div>
-                </div>
-                <MoreVertical size={18} className="card-options" style={{ marginLeft: 'auto', flexShrink: 0 }} />
-              </div>
-            </div>
-
-        <div className="section-header mobile-favorites-header" style={{ marginTop: '20px' }}>
+        <div className="section-header mobile-favorites-header dashboard-section-tight">
           <span>FAVORITE FOLDERS</span>
         </div>
         
@@ -1368,7 +1374,8 @@ ${url}`);
                     {visibleFolderContents.map((item, idx) => (
                       <div 
                         key={idx} 
-                        className={`fm-item grid-item ${selectedPaths.includes(item.path) ? 'checked' : ''}`} 
+                        className={`fm-item grid-item ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''}`} 
+                        onClick={() => setInspectorItem(item)}
                         onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
                         onContextMenu={(e) => handleItemContextMenu(e, item, false)}
                       >
@@ -1444,9 +1451,9 @@ ${url}`);
                         {visibleFolderContents.map((item, idx) => (
                           <tr 
                             key={idx} 
-                            className={`fm-list-row ${selectedPaths.includes(item.path) ? 'checked' : ''}`}
+                            className={`fm-list-row ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''}`}
                             onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
-                            onClick={() => toggleSelectItem(item.path)}
+                            onClick={() => setInspectorItem(item)}
                             onContextMenu={(e) => handleItemContextMenu(e, item, false)}
                           >
                             <td style={{ paddingLeft: '16px', width: '40px' }} onClick={(e) => e.stopPropagation()}>

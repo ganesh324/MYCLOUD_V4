@@ -212,6 +212,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/api/health")
+async def health():
+    return {
+        "status": "ok",
+        "storage_root": STORAGE_ROOT,
+        "storage_available": os.path.isdir(STORAGE_ROOT),
+        "time": datetime.utcnow().isoformat() + "Z",
+    }
+
 IMAGE_EXTENSIONS = {"bmp", "gif", "jpeg", "jpg", "png", "tga", "tif", "webp", "psd", "ico", "svg", "icns"}
 VIDEO_EXTENSIONS = {"3gp", "avi", "mkv", "mov", "mp4", "mts", "mxf", "vob", "wmv"}
 MUSIC_EXTENSIONS = {"mp3", "wav", "flac", "ogg", "aac"}
