@@ -4,8 +4,26 @@ import sqlite3
 from datetime import datetime
 
 # Path Configurations
-MOUNT_POINT = "/mnt/Drive1"
-DB_PATH = "/home/ganesh/mycloud/app/data/stats.db"
+DATA_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "data"))
+ENV_PATH = os.environ.get("MYCLOUD_ENV_FILE", os.path.join(DATA_DIR, "mycloud.env"))
+
+
+def load_env_file(path):
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+load_env_file(ENV_PATH)
+
+MOUNT_POINT = os.path.realpath(os.environ.get("MYCLOUD_STORAGE_ROOT", "/mnt/Drive1"))
+DB_PATH = os.environ.get("MYCLOUD_DB_PATH", os.path.join(DATA_DIR, "stats.db"))
 
 def init_db():
     """Creates the files table if it doesn't exist."""

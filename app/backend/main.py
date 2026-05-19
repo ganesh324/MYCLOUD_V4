@@ -20,9 +20,57 @@ import secrets
 import subprocess
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "stats.db")
+DATA_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "data"))
+ENV_PATH = os.environ.get("MYCLOUD_ENV_FILE", os.path.join(DATA_DIR, "mycloud.env"))
+
+
+def load_env_file(path: str):
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            os.environ.setdefault(key, value)
+
+
+load_env_file(ENV_PATH)
+
+DB_PATH = os.environ.get("MYCLOUD_DB_PATH", os.path.join(DATA_DIR, "stats.db"))
 STORAGE_ROOT = os.path.realpath(os.environ.get("MYCLOUD_STORAGE_ROOT", "/mnt/Drive1"))
+STORAGE_LABEL = os.environ.get("MYCLOUD_STORAGE_LABEL", os.path.basename(STORAGE_ROOT) or "Storage")
 SECRET_KEY = os.environ.get("MYCLOUD_SECRET_KEY", "mycloud_dev_secret_change_me")
+DEFAULT_FAVORITE_PATH = os.environ.get("MYCLOUD_DEFAULT_FAVORITE_PATH", STORAGE_ROOT)
+DEFAULT_FAVORITE_LABEL = os.environ.get("MYCLOUD_DEFAULT_FAVORITE_LABEL", STORAGE_LABEL)
+CORS_ORIGINS = [origin.strip() for origin in os.environ.get("MYCLOUD_CORS_ORIGINS", "*").split(",") if origin.strip()]
+
+
+def load_json_env(name: str, default):
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        print(f"Invalid JSON in {name}; using default")
+        return default
+
+
+DEFAULT_SEED_USERS = [
+    {"username": "admin", "password": "change-me-admin", "role": "admin", "display_name": "Admin"},
+    {"username": "user", "password": "change-me-user", "role": "user", "display_name": "User"},
+]
+DEFAULT_LOGIN_PROFILES = [
+    {"id": "admin", "display_name": "Admin", "initials": "AD", "username": "admin"},
+    {"id": "user", "display_name": "User", "initials": "US", "username": "user"},
+]
+
+SEED_USERS = load_json_env("MYCLOUD_SEED_USERS", DEFAULT_SEED_USERS)
+LOGIN_PROFILES = load_json_env("MYCLOUD_LOGIN_PROFILES", DEFAULT_LOGIN_PROFILES)
 
 def hash_password(password: str, salt: str = None) -> tuple[str, str]:
     if not salt:
@@ -174,24 +222,25 @@ async def lifespan(app: FastAPI):
         cursor = await db.execute("SELECT COUNT(*) FROM users")
         row = await cursor.fetchone()
         if row and row[0] == 0:
-            users_to_seed = [
-                ("ganesh_admin", "Hello324", "admin", "Ganesh (Admin)"),
-                ("ganesh", "Hello324", "user", "Ganesh Eeti"),
-                ("haritha", "Hello0611", "user", "Haritha Kothuri")
-            ]
-            for username, password, role, display_name in users_to_seed:
+            for user_record in SEED_USERS:
+                username = user_record.get("username")
+                password = user_record.get("password")
+                role = user_record.get("role", "user")
+                display_name = user_record.get("display_name", username)
+                if not username or not password:
+                    continue
                 hashed, salt = hash_password(password)
                 await db.execute('''
                     INSERT INTO users (username, password_hash, salt, role, display_name)
                     VALUES (?, ?, ?, ?, ?)
                 ''', (username, hashed, salt, role, display_name))
             await db.commit()
-            print("Successfully seeded 3 default accounts in MyCloud database!")
+            print(f"Successfully seeded {len(SEED_USERS)} default account(s) in MyCloud database!")
         
         await db.execute('''
             INSERT OR IGNORE INTO favorites (path, type, name) 
-            VALUES ('/mnt/Drive1', 'Folder', 'Drive1')
-        ''')
+            VALUES (?, 'Folder', ?)
+        ''', (DEFAULT_FAVORITE_PATH, DEFAULT_FAVORITE_LABEL))
         await db.execute('''
             INSERT OR IGNORE INTO file_permissions (path, username, permission, granted_by, created_at)
             SELECT f.filepath, u.username, 'full', 'system_migration', ?
@@ -206,7 +255,7 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -219,6 +268,14 @@ async def health():
         "storage_root": STORAGE_ROOT,
         "storage_available": os.path.isdir(STORAGE_ROOT),
         "time": datetime.utcnow().isoformat() + "Z",
+    }
+
+@app.get("/api/config/public")
+async def public_config():
+    return {
+        "storage_root": STORAGE_ROOT,
+        "storage_label": STORAGE_LABEL,
+        "login_profiles": LOGIN_PROFILES,
     }
 
 IMAGE_EXTENSIONS = {"bmp", "gif", "jpeg", "jpg", "png", "tga", "tif", "webp", "psd", "ico", "svg", "icns"}

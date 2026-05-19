@@ -4,12 +4,14 @@ services:
       context: ./app/backend
     container_name: mycloud-backend
     restart: unless-stopped
+    env_file:
+      - ./app/data/mycloud.env
     environment:
-      MYCLOUD_STORAGE_ROOT: /mnt/Drive1
+      MYCLOUD_STORAGE_ROOT: ${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}
       MYCLOUD_SECRET_KEY: ${MYCLOUD_SECRET_KEY:-mycloud_dev_secret_change_me}
     volumes:
       - ./app/data:/app/data
-      - /mnt/Drive1:/mnt/Drive1
+      - ${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}:${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}
     expose:
       - "8000"
     healthcheck:

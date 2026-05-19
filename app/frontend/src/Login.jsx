@@ -1,19 +1,20 @@
 import { useState } from 'react';
 import { User, Lock, Shield, Eye, EyeOff, Loader2, ArrowRight } from 'lucide-react';
 
-function Login({ onLoginSuccess }) {
+function Login({ onLoginSuccess, profiles = [] }) {
   const [method, setMethod] = useState('profile'); // 'profile' | 'credentials'
-  const [selectedUser, setSelectedUser] = useState(null); // 'ganesh' | 'haritha'
-  const [roleMode, setRoleMode] = useState('user'); // 'admin' | 'user' for Ganesh
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [roleMode, setRoleMode] = useState('user');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleProfileSelect = (user) => {
-    setSelectedUser(user);
-    if (user === 'haritha') {
+  const handleProfileSelect = (profileId) => {
+    const profile = profiles.find((item) => item.id === profileId);
+    setSelectedUser(profileId);
+    if (!profile?.admin_username) {
       setRoleMode('user');
     }
     setPassword('');
@@ -29,17 +30,16 @@ function Login({ onLoginSuccess }) {
     let loginPassword = password;
 
     if (method === 'profile') {
-      if (selectedUser === 'ganesh') {
-        loginUsername = roleMode === 'admin' ? 'ganesh_admin' : 'ganesh';
-        loginPassword = password;
-      } else if (selectedUser === 'haritha') {
-        loginUsername = 'haritha';
-        loginPassword = password;
-      } else {
+      const selectedProfile = profiles.find((item) => item.id === selectedUser);
+      if (!selectedProfile) {
         setError('Please select a profile first');
         setLoading(false);
         return;
       }
+      loginUsername = roleMode === 'admin' && selectedProfile.admin_username
+        ? selectedProfile.admin_username
+        : selectedProfile.username;
+      loginPassword = password;
     }
 
     try {
@@ -89,58 +89,50 @@ function Login({ onLoginSuccess }) {
         )}
 
         <form onSubmit={handleLogin} className="login-form">
-          {method === 'profile' ? (
+          {method === 'profile' && profiles.length > 0 ? (
             <div className="profile-selection">
               <p className="section-label">Select your profile to log in</p>
               
               <div className="profile-grid">
-                {/* Ganesh Eeti Profile */}
-                <div 
-                  className={`profile-card glass ${selectedUser === 'ganesh' ? 'active' : ''}`}
-                  onClick={() => handleProfileSelect('ganesh')}
-                >
-                  <div className="profile-avatar ganesh-avatar">GE</div>
-                  <div className="profile-name">Ganesh Eeti</div>
-                  {selectedUser === 'ganesh' && (
-                    <div className="role-switcher-container" onClick={(e) => e.stopPropagation()}>
-                      <div className="role-switches">
-                        <button 
-                          type="button"
-                          className={`role-btn ${roleMode === 'user' ? 'active' : ''}`}
-                          onClick={() => setRoleMode('user')}
-                        >
-                          Normal
-                        </button>
-                        <button 
-                          type="button"
-                          className={`role-btn ${roleMode === 'admin' ? 'active' : ''}`}
-                          onClick={() => setRoleMode('admin')}
-                        >
-                          Admin
-                        </button>
+                {profiles.map((profile) => (
+                  <div
+                    key={profile.id}
+                    className={`profile-card glass ${selectedUser === profile.id ? 'active' : ''}`}
+                    onClick={() => handleProfileSelect(profile.id)}
+                  >
+                    <div className="profile-avatar">{profile.initials || profile.display_name?.slice(0, 2) || 'U'}</div>
+                    <div className="profile-name">{profile.display_name}</div>
+                    {selectedUser === profile.id && (
+                      <div className="role-switcher-container" onClick={(e) => e.stopPropagation()}>
+                        {profile.admin_username ? (
+                          <div className="role-switches">
+                            <button
+                              type="button"
+                              className={`role-btn ${roleMode === 'user' ? 'active' : ''}`}
+                              onClick={() => setRoleMode('user')}
+                            >
+                              Normal
+                            </button>
+                            <button
+                              type="button"
+                              className={`role-btn ${roleMode === 'admin' ? 'active' : ''}`}
+                              onClick={() => setRoleMode('admin')}
+                            >
+                              Admin
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="badge badge-user">Normal User</span>
+                        )}
                       </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Haritha Kothuri Profile */}
-                <div 
-                  className={`profile-card glass ${selectedUser === 'haritha' ? 'active' : ''}`}
-                  onClick={() => handleProfileSelect('haritha')}
-                >
-                  <div className="profile-avatar haritha-avatar">HK</div>
-                  <div className="profile-name">Haritha Kothuri</div>
-                  {selectedUser === 'haritha' && (
-                    <div className="role-switcher-container">
-                      <span className="badge badge-user">Normal User</span>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                ))}
               </div>
 
               {selectedUser && (
                 <div className="input-group animate-slide-up" style={{ marginTop: '8px' }}>
-                  <label htmlFor="profile-password">Enter password for {selectedUser === 'ganesh' ? 'Ganesh' : 'Haritha'}</label>
+                  <label htmlFor="profile-password">Enter password for {profiles.find((profile) => profile.id === selectedUser)?.display_name || 'selected profile'}</label>
                   <div className="input-field-wrapper">
                     <Lock size={18} className="input-icon" />
                     <input
@@ -165,7 +157,7 @@ function Login({ onLoginSuccess }) {
               <div className="profile-action-area">
                 <button
                   type="submit"
-                  disabled={loading || !selectedUser}
+                  disabled={loading || !selectedUser || profiles.length === 0}
                   className="btn-primary login-btn"
                 >
                   {loading ? (
@@ -251,7 +243,7 @@ function Login({ onLoginSuccess }) {
                   type="button"
                   className="switch-login-method-btn"
                   onClick={() => {
-                    setMethod('profile');
+                    setMethod(profiles.length > 0 ? 'profile' : 'credentials');
                     setError('');
                   }}
                 >

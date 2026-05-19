@@ -1,9 +1,18 @@
 #!/bin/bash
 
 # Configuration Paths
-MOUNT_POINT="/mnt/Drive1"
-DEVICE="/dev/sda1"
-OUTPUT_LOG="/home/ganesh/mycloud/app/data/drive_report.txt"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ENV_FILE="${MYCLOUD_ENV_FILE:-$APP_DIR/app/data/mycloud.env}"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  . "$ENV_FILE"
+  set +a
+fi
+
+MOUNT_POINT="${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}"
+DEVICE="${MYCLOUD_STORAGE_DEVICE:-/dev/sda1}"
+OUTPUT_LOG="${MYCLOUD_DRIVE_REPORT:-$APP_DIR/app/data/drive_report.txt}"
 TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
 
 # Ensure data directory exists

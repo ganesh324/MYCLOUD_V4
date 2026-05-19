@@ -2,10 +2,16 @@
 
 ## Docker
 
-Build and start the full app:
+Create your local environment file first:
 
 ```bash
-docker compose up --build
+cp .env.example app/data/mycloud.env
+```
+
+Edit `app/data/mycloud.env` with your local storage path, users, and secret key. Then build and start the full app:
+
+```bash
+docker compose --env-file app/data/mycloud.env up --build
 ```
 
 Open the app at:
@@ -28,9 +34,10 @@ The compose stack runs:
 Mounted paths:
 
 - `./app/data` -> `/app/data` for SQLite data and thumbnails.
-- `/mnt/Drive1` -> `/mnt/Drive1` for your storage drive.
+- `./app/data` -> `/app/data` for SQLite data, thumbnails, and local environment values.
+- `${MYCLOUD_STORAGE_ROOT}` -> `${MYCLOUD_STORAGE_ROOT}` for your storage drive.
 
-Before using this outside your home network, copy `.env.example` to `.env` and set a strong `MYCLOUD_SECRET_KEY`.
+Before using this outside your home network, set a strong `MYCLOUD_SECRET_KEY` in `app/data/mycloud.env`.
 
 ## 24/7 watchdog
 
@@ -41,11 +48,11 @@ crontab -e
 ```
 
 ```cron
-0 */3 * * * /home/ganesh/mycloud/scripts/watchdog.sh
+0 */3 * * * MYCLOUD_APP_DIR=/path/to/mycloud /path/to/mycloud/scripts/watchdog.sh
 ```
 
 Watchdog logs are written to:
 
 ```text
-/home/ganesh/mycloud/app/data/watchdog.log
+${MYCLOUD_WATCHDOG_LOG:-app/data/watchdog.log}
 ```

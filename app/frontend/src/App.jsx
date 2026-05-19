@@ -40,6 +40,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accentTheme, setAccentTheme] = useState(() => localStorage.getItem('mycloud_accent_theme') || 'deep-ocean');
+  const [appConfig, setAppConfig] = useState({ storage_root: '/mnt/Drive1', storage_label: 'Drive1', login_profiles: [] });
 
   const [stats, setStats] = useState({
     images: 0, videos: 0, music: 0, files: 0, folders: 0, total_size: 0
@@ -145,6 +146,26 @@ function App() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const res = await fetch('/api/config/public');
+        if (res.ok) {
+          const data = await res.json();
+          setAppConfig({
+            storage_root: data.storage_root || '/mnt/Drive1',
+            storage_label: data.storage_label || 'Drive1',
+            login_profiles: data.login_profiles || []
+          });
+          setCurrentPath((previousPath) => previousPath === '/mnt/Drive1' && data.storage_root ? data.storage_root : previousPath);
+        }
+      } catch (error) {
+        console.error('Failed to load app config:', error);
+      }
+    };
+    loadConfig();
+  }, []);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -699,7 +720,7 @@ ${url}`);
   }
 
   if (!user) {
-    return <Login onLoginSuccess={handleLoginSuccess} />;
+    return <Login onLoginSuccess={handleLoginSuccess} profiles={appConfig.login_profiles} />;
   }
 
   const favoriteFolders = favorites.filter(f => f.type === 'Folder');
@@ -721,12 +742,15 @@ ${url}`);
     { key: 'music', label: 'Music', value: stats.music, color: '#10b981' },
     { key: 'files', label: 'Files', value: stats.files, color: '#f59e0b' }
   ];
+  const storageRoot = appConfig.storage_root || '/mnt/Drive1';
+  const storageLabel = appConfig.storage_label || 'Drive1';
+  const formatDisplayPath = (path) => (path || '').replace(storageRoot, storageLabel);
   const categoryCards = [
     { label: 'Images', count: stats.images, meta: 'image files', icon: ImageIcon, color: '#3a7bd5', action: () => openCategory('Images') },
     { label: 'Videos', count: stats.videos, meta: 'video files', icon: Video, color: '#8a2387', action: () => openCategory('Videos') },
     { label: 'Music', count: stats.music, meta: 'audio files', icon: Music, color: '#10b981', action: () => openCategory('Music') },
     { label: 'Documents', count: stats.files, meta: 'other files', icon: FileText, color: '#f59e0b', action: () => openCategory('Files') },
-    { label: 'Folders', count: stats.folders, meta: 'folders', icon: Folder, color: '#0f766e', action: () => openFolder('/mnt/Drive1') }
+    { label: 'Folders', count: stats.folders, meta: 'folders', icon: Folder, color: '#0f766e', action: () => openFolder(storageRoot) }
   ];
   const lastIndexLabel = dashboardHealth.index?.database_modified
     ? new Date(dashboardHealth.index.database_modified * 1000).toLocaleString()
@@ -766,9 +790,9 @@ ${url}`);
             </div>
 
             <div className="explorer-root">
-              <button className="explorer-root-label" onClick={() => openFolder('/mnt/Drive1')} title="Open Drive1">
+              <button className="explorer-root-label" onClick={() => openFolder(storageRoot)} title={`Open ${storageLabel}`}>
                 <ChevronRight size={14} />
-                <span>MYCLOUD</span>
+                <span>{storageLabel}</span>
               </button>
 
               <div className="explorer-tree">
@@ -831,7 +855,7 @@ ${url}`);
           </div>
           <div 
             className={`nav-item ${currentView === 'fileManager' ? 'active' : ''}`} 
-            onClick={() => { openFolder('/mnt/Drive1'); setMobileMenuOpen(false); }}
+            onClick={() => { openFolder(storageRoot); setMobileMenuOpen(false); }}
             title="All Files"
           >
             <Folder size={20} style={{ minWidth: '20px' }} />
@@ -930,7 +954,7 @@ ${url}`);
                         if (item.type === 'Folder') {
                           openFolder(item.path);
                         } else {
-                          const parentDir = item.path.substring(0, item.path.lastIndexOf('/')) || '/mnt/Drive1';
+                          const parentDir = item.path.substring(0, item.path.lastIndexOf('/')) || storageRoot;
                           openFolder(parentDir);
                           setTimeout(() => openPreview(item), 600);
                         }
@@ -948,7 +972,7 @@ ${url}`);
                       </div>
                       <div className="search-result-info">
                         <span className="search-result-name">{item.name}</span>
-                        <span className="search-result-path">{item.path.replace('/mnt/Drive1', 'Drive1')}</span>
+                        <span className="search-result-path">{formatDisplayPath(item.path)}</span>
                       </div>
                     </div>
                   ))

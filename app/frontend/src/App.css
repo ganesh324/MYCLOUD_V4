@@ -1817,12 +1817,8 @@
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
 }
 
-.ganesh-avatar {
+.profile-avatar {
   background: var(--accent-gradient);
-}
-
-.haritha-avatar {
-  background: linear-gradient(135deg, #ec008c, #fc6767);
 }
 
 .profile-name {
