@@ -347,6 +347,7 @@ def get_item_type(path: str) -> str:
         return "Text"
     return "File"
 
+
 async def log_activity(action: str, path: str | None, actor: str, details: str | None = None):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -503,7 +504,7 @@ async def get_files_list(path: str = STORAGE_ROOT, user: dict = Depends(get_curr
 
     # Fetch favorites to quickly determine favorite status
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('SELECT path FROM favorites')
+        cursor = await db.execute("SELECT path FROM favorites")
         rows = await cursor.fetchall()
         favorites = {row[0] for row in rows}
 
@@ -1042,8 +1043,17 @@ async def file_details(path: str, user: dict = Depends(get_current_user)):
 async def copy_item(req: FileOperationRequest, user: dict = Depends(get_current_user)):
     source = resolve_storage_path(req.source_path)
     target_dir = resolve_storage_path(req.target_dir)
+    if not os.path.exists(source):
+        raise HTTPException(status_code=404, detail="Item not found")
     if not os.path.isdir(target_dir):
         raise HTTPException(status_code=400, detail="Target must be a folder")
+    if os.path.isdir(source):
+        try:
+            target_inside_source = os.path.commonpath([source, target_dir]) == source
+        except ValueError:
+            target_inside_source = False
+        if target_inside_source:
+            raise HTTPException(status_code=400, detail="Cannot copy a folder into itself or one of its subfolders")
     target = safe_child_path(target_dir, req.new_name or os.path.basename(source))
     if os.path.exists(target):
         raise HTTPException(status_code=400, detail="Target already exists")
@@ -1058,14 +1068,24 @@ async def copy_item(req: FileOperationRequest, user: dict = Depends(get_current_
 async def move_item(req: FileOperationRequest, user: dict = Depends(get_current_user)):
     source = resolve_storage_path(req.source_path)
     target_dir = resolve_storage_path(req.target_dir)
+    if not os.path.exists(source):
+        raise HTTPException(status_code=404, detail="Item not found")
     if not os.path.isdir(target_dir):
         raise HTTPException(status_code=400, detail="Target must be a folder")
+    if os.path.isdir(source):
+        try:
+            target_inside_source = os.path.commonpath([source, target_dir]) == source
+        except ValueError:
+            target_inside_source = False
+        if target_inside_source:
+            raise HTTPException(status_code=400, detail="Cannot move a folder into itself or one of its subfolders")
     target = safe_child_path(target_dir, req.new_name or os.path.basename(source))
     if os.path.exists(target):
         raise HTTPException(status_code=400, detail="Target already exists")
     shutil.move(source, target)
     await log_activity("move", source, user["username"], target)
     return {"status": "success", "path": target}
+
 
 @app.get("/api/trash")
 async def list_trash(user: dict = Depends(get_current_user)):

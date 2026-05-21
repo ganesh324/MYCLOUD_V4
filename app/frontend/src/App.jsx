@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { 
   Home, Folder, Star, Share2, Search, Upload, Plus, 
   Menu, MoreVertical, Image as ImageIcon, Video, Music, FileText, ChevronRight, ChevronLeft, ArrowLeft,
-  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, AlertCircle, Loader2, Download, AlignLeft, X
+  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, Loader2, Download, AlignLeft, X, MoveRight, Copy, Clipboard, Scissors
 } from 'lucide-react';
 import './App.css';
 import Login from './Login';
@@ -34,6 +34,8 @@ const authUrl = (endpoint, path) => {
   return `${endpoint}?${params.toString()}`;
 };
 
+const hasMyCloudDragPayload = (dataTransfer) => Array.from(dataTransfer?.types || []).includes('application/x-mycloud-paths');
+
 function App() {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -57,6 +59,10 @@ function App() {
   const [activeModal, setActiveModal] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [renameInput, setRenameInput] = useState('');
+  const [moveTarget, setMoveTarget] = useState('');
+  const [fileClipboard, setFileClipboard] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [dragOverPath, setDragOverPath] = useState(null);
   
   // Preview States
   const [previewItem, setPreviewItem] = useState(null);
@@ -66,10 +72,11 @@ function App() {
   // Folder & Upload States
   const [newFolderName, setNewFolderName] = useState('');
   const [uploadQueue, setUploadQueue] = useState([]);
-  const [isDragging, setIsDragging] = useState(false);
   const [isCanvasDragging, setIsCanvasDragging] = useState(false);
+  const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
+  const currentPathRef = useRef(currentPath);
 
   // Advanced States: Search, Category Gallery, Bulk Selections
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,6 +94,10 @@ function App() {
   const [typeFilter, setTypeFilter] = useState('All');
   const [toolsData, setToolsData] = useState({ trash: [], users: [], activity: [], index: null });
   const [operationTarget, setOperationTarget] = useState('');
+
+  useEffect(() => {
+    currentPathRef.current = currentPath;
+  }, [currentPath]);
 
   const openFolder = async (path) => {
     setCurrentView('fileManager');
@@ -258,6 +269,12 @@ function App() {
     setActiveModal('delete');
   };
 
+  const handleMoveClick = (item) => {
+    setSelectedItem(item);
+    setMoveTarget('');
+    setActiveModal('move');
+  };
+
   const handleRenameSubmit = async (e) => {
     e.preventDefault();
     if (!renameInput.trim() || !selectedItem) return;
@@ -298,6 +315,29 @@ function App() {
       }
     } catch (error) {
       console.error("Error deleting:", error);
+    }
+  };
+
+  const handleMoveSubmit = async (e) => {
+    e.preventDefault();
+    if (!moveTarget.trim() || !selectedItem) return;
+    try {
+      const res = await fetch('/api/files/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_path: selectedItem.path, target_dir: moveTarget.trim() })
+      });
+      if (res.ok) {
+        setActiveModal(null);
+        setMoveTarget('');
+        openFolder(currentPath);
+        fetchStats();
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Failed to move");
+      }
+    } catch (error) {
+      console.error("Error moving:", error);
     }
   };
 
@@ -388,8 +428,9 @@ function App() {
   const handleUploadFiles = async (files) => {
     const fileList = Array.from(files || []);
     if (fileList.length === 0) return;
-    setActiveModal('uploadCenter');
+    setUploadMenuOpen(false);
     
+    const targetPath = currentPath;
     const newItems = fileList.map((f, idx) => {
       const relativePath = f.webkitRelativePath || f.relativePath || f.name;
       return {
@@ -399,7 +440,8 @@ function App() {
         progress: 0,
         status: 'pending',
         file: f,
-        relativePath
+        relativePath,
+        targetPath
       };
     });
     
@@ -409,14 +451,16 @@ function App() {
       await uploadSingleFile(item);
     }
     
-    openFolder(currentPath);
+    if (currentPathRef.current === targetPath) {
+      openFolder(targetPath);
+    }
     fetchStats();
   };
 
   const uploadSingleFile = (queueItem) => {
     return new Promise((resolve) => {
       const formData = new FormData();
-      formData.append('path', currentPath);
+      formData.append('path', queueItem.targetPath || currentPath);
       formData.append('relative_path', queueItem.relativePath || queueItem.file.name);
       formData.append('file', queueItem.file);
       
@@ -464,6 +508,16 @@ function App() {
     });
   };
 
+  const openFilePicker = () => {
+    setUploadMenuOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const openFolderPicker = () => {
+    setUploadMenuOpen(false);
+    folderInputRef.current?.click();
+  };
+
   const handleSearch = async (query) => {
     if (!query.trim()) {
       setSearchResults([]);
@@ -497,12 +551,116 @@ function App() {
     }
   };
 
-  const handleItemContextMenu = (e, item) => {
+  const openItemMenu = (e, item) => {
     e.preventDefault();
+    e.stopPropagation();
     setInspectorItem(item);
     if (window.matchMedia('(max-width: 768px)').matches) {
       setMobileActiveItem(item);
+      return;
     }
+    setContextMenu({ x: e.clientX, y: e.clientY, item });
+  };
+
+  const handleItemContextMenu = (e, item) => {
+    openItemMenu(e, item);
+  };
+
+  const handleItemClick = (e, item) => {
+    setInspectorItem(item);
+    closeContextMenu();
+    if (e.ctrlKey || e.metaKey) {
+      setSelectedPaths(prev => prev.includes(item.path) ? prev.filter(path => path !== item.path) : [...prev, item.path]);
+      return;
+    }
+    setSelectedPaths([item.path]);
+  };
+
+  const handleFolderContextMenu = (e) => {
+    if (e.target.closest('.fm-item, .fm-list-row, button, input, select, a')) return;
+    e.preventDefault();
+    setInspectorItem(null);
+    setContextMenu({ x: e.clientX, y: e.clientY, item: null });
+  };
+
+  const closeContextMenu = () => setContextMenu(null);
+
+  const getClipboardSourcePaths = (item) => {
+    if (item && selectedPaths.includes(item.path)) return selectedPaths;
+    return item ? [item.path] : selectedPaths;
+  };
+
+  const beginClipboardOperation = (mode, item) => {
+    const paths = getClipboardSourcePaths(item);
+    if (paths.length === 0) return;
+    setFileClipboard({ mode, paths });
+    closeContextMenu();
+  };
+
+  const pasteClipboard = async (targetDir = currentPath) => {
+    if (!fileClipboard?.paths?.length) return;
+    const endpointMode = fileClipboard.mode === 'cut' ? 'move' : 'copy';
+    for (const path of fileClipboard.paths) {
+      const res = await fetch('/api/files/' + endpointMode, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_path: path, target_dir: targetDir })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || ('Failed to ' + endpointMode + ' item'));
+        break;
+      }
+    }
+    if (fileClipboard.mode === 'cut') setFileClipboard(null);
+    setSelectedPaths([]);
+    closeContextMenu();
+    openFolder(currentPath);
+    fetchStats();
+  };
+
+  const getDragPaths = (item) => selectedPaths.includes(item.path) ? selectedPaths : [item.path];
+
+  const handleItemDragStart = (e, item) => {
+    setIsCanvasDragging(false);
+    const paths = getDragPaths(item);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/x-mycloud-paths', JSON.stringify(paths));
+    e.dataTransfer.setData('text/plain', paths.join('\n'));
+  };
+
+  const handleFolderDragOver = (e, item) => {
+    if (item.type !== 'Folder' || !hasMyCloudDragPayload(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverPath(item.path);
+  };
+
+  const handleFolderDrop = async (e, item) => {
+    if (item.type !== 'Folder') return;
+    const rawPaths = e.dataTransfer.getData('application/x-mycloud-paths');
+    if (!rawPaths) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPath(null);
+    setIsCanvasDragging(false);
+    const paths = JSON.parse(rawPaths).filter(path => path !== item.path);
+    for (const path of paths) {
+      const res = await fetch('/api/files/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_path: path, target_dir: item.path })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || 'Failed to move item');
+        break;
+      }
+    }
+    setSelectedPaths([]);
+    openFolder(currentPath);
+    fetchStats();
   };
 
   const toggleSelectItem = (path, e) => {
@@ -651,7 +809,6 @@ function App() {
     setMobileMenuOpen(false);
     await loadTrashView();
   };
-
   const runReindex = async () => {
     const res = await fetch('/api/index/reindex', { method: 'POST' });
     const data = await res.json();
@@ -689,6 +846,12 @@ ${url}`);
     fetchStats();
   };
 
+  const getParentPath = (path) => {
+    const parts = path.split('/').filter(Boolean);
+    if (parts.length <= 1) return path;
+    return '/' + parts.slice(0, -1).join('/');
+  };
+
   const formatSize = (bytes) => {
     if (!bytes) return '0 B';
     const k = 1024;
@@ -709,6 +872,12 @@ ${url}`);
     path: '/' + pathParts.slice(0, idx + 1).join('/')
   }));
   const childFolders = folderContents.filter(item => item.type === 'Folder');
+  const moveDestinationOptions = [
+    ...(currentPath !== appConfig.storage_root ? [{ name: 'Parent folder', path: getParentPath(currentPath) }] : []),
+    ...childFolders
+      .filter(folder => folder.path !== selectedItem?.path)
+      .map(folder => ({ name: folder.name, path: folder.path }))
+  ];
 
   if (!authChecked) {
     return (
@@ -745,6 +914,22 @@ ${url}`);
   const storageRoot = appConfig.storage_root || '/mnt/Drive1';
   const storageLabel = appConfig.storage_label || 'Drive1';
   const formatDisplayPath = (path) => (path || '').replace(storageRoot, storageLabel);
+  const uploadSummary = uploadQueue.reduce((acc, item) => {
+    acc.total += item.size || 0;
+    acc.loaded += ((item.size || 0) * (item.progress || 0)) / 100;
+    acc.completed += item.status === 'completed' ? 1 : 0;
+    acc.errors += item.status === 'error' ? 1 : 0;
+    acc.active += ['pending', 'uploading', 'processing'].includes(item.status) ? 1 : 0;
+    return acc;
+  }, { total: 0, loaded: 0, completed: 0, errors: 0, active: 0 });
+  const uploadProgress = uploadSummary.total > 0 ? Math.round((uploadSummary.loaded / uploadSummary.total) * 100) : 0;
+  const uploadPanelTitle = uploadSummary.active > 0 ? `Uploading ${uploadQueue.length} ${uploadQueue.length === 1 ? 'item' : 'items'}` : uploadSummary.errors > 0 ? 'Upload finished with errors' : 'Upload complete';
+  const uploadPanelName = (() => {
+    if (uploadQueue.length === 0) return '';
+    const firstName = uploadQueue[0].name || 'Upload';
+    const rootName = firstName.split('/')[0];
+    return rootName || firstName;
+  })();
   const categoryCards = [
     { label: 'Images', count: stats.images, meta: 'image files', icon: ImageIcon, color: '#3a7bd5', action: () => openCategory('Images') },
     { label: 'Videos', count: stats.videos, meta: 'video files', icon: Video, color: '#8a2387', action: () => openCategory('Videos') },
@@ -757,7 +942,7 @@ ${url}`);
     : 'Unknown';
 
   return (
-    <div className={`dashboard ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileMenuOpen ? 'mobile-sidebar-open' : ''}`}>
+    <div className={`dashboard ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileMenuOpen ? 'mobile-sidebar-open' : ''}`} onClick={() => contextMenu && closeContextMenu()}>
       {/* Mobile Backdrop */}
       {mobileMenuOpen && (
         <div className="sidebar-backdrop" onClick={() => setMobileMenuOpen(false)}></div>
@@ -980,7 +1165,7 @@ ${url}`);
               </div>
             )}
           </div>
-          
+
           <div className="header-actions">
             <div className="action-capsule">
               <input 
@@ -988,7 +1173,7 @@ ${url}`);
                 multiple 
                 ref={fileInputRef} 
                 style={{ display: 'none' }} 
-                onChange={(e) => handleUploadFiles(e.target.files)} 
+                onChange={(e) => { handleUploadFiles(e.target.files); e.target.value = ''; }} 
               />
               <input
                 type="file"
@@ -997,12 +1182,26 @@ ${url}`);
                 style={{ display: 'none' }}
                 webkitdirectory=""
                 directory=""
-                onChange={(e) => handleUploadFiles(e.target.files)}
+                onChange={(e) => { handleUploadFiles(e.target.files); e.target.value = ''; }}
               />
-              <button className="btn-primary" onClick={() => { setActiveModal('uploadCenter'); }}>
-                <Upload size={18} />
-                Upload
-              </button>
+              <div className="upload-action-wrap">
+                <button className="btn-primary" onClick={() => setUploadMenuOpen((open) => !open)} aria-expanded={uploadMenuOpen}>
+                  <Upload size={18} />
+                  Upload
+                </button>
+                {uploadMenuOpen && (
+                  <div className="upload-menu glass animate-scale-up">
+                    <button type="button" onClick={openFilePicker}>
+                      <FileText size={18} />
+                      <span>Files</span>
+                    </button>
+                    <button type="button" onClick={openFolderPicker}>
+                      <Folder size={18} />
+                      <span>Folder</span>
+                    </button>
+                  </div>
+                )}
+              </div>
               <button className="btn-secondary" onClick={() => setActiveModal('newFolder')}>
                 <Plus size={18} />
                 New Folder
@@ -1290,8 +1489,9 @@ ${url}`);
         ) : (
           <div
             className={`file-manager-view animate-fade-in ${isCanvasDragging ? 'canvas-dragging' : ''}`}
-            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsCanvasDragging(true); }}
-            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsCanvasDragging(true); }}
+            onContextMenu={handleFolderContextMenu}
+            onDragOver={(e) => { if (hasMyCloudDragPayload(e.dataTransfer)) return; e.preventDefault(); e.stopPropagation(); setIsCanvasDragging(true); }}
+            onDragEnter={(e) => { if (hasMyCloudDragPayload(e.dataTransfer)) return; e.preventDefault(); e.stopPropagation(); setIsCanvasDragging(true); }}
             onDragLeave={(e) => {
               if (!e.currentTarget.contains(e.relatedTarget)) setIsCanvasDragging(false);
             }}
@@ -1299,13 +1499,15 @@ ${url}`);
               e.preventDefault();
               e.stopPropagation();
               setIsCanvasDragging(false);
-              handleUploadFiles(await collectDroppedFiles(e.dataTransfer));
+              if (!hasMyCloudDragPayload(e.dataTransfer)) {
+                handleUploadFiles(await collectDroppedFiles(e.dataTransfer));
+              }
             }}
           >
             {isCanvasDragging && (
               <div className="canvas-drop-overlay">
                 <CloudUpload size={34} />
-                <span>Drop files or folders to upload here</span>
+                <span>Drop files or folders into {formatDisplayPath(currentPath)}</span>
               </div>
             )}
             <div className={`fm-command-band ${selectedPaths.length > 0 ? 'selection-active' : ''}`}>
@@ -1367,15 +1569,9 @@ ${url}`);
                     <Folder size={16} />
                     <span>Folder</span>
                   </button>
-                  <button className="fm-command-btn" onClick={() => setActiveModal('uploadCenter')} title="Upload Files">
+                  <button className="fm-command-btn" onClick={openFilePicker} title="Upload files">
                     <CloudUpload size={16} />
                     <span>Upload</span>
-                  </button>
-                  <button
-                    className={`fm-command-btn ${folderContents.length > 0 && folderContents.every(i => selectedPaths.includes(i.path)) ? 'active' : ''}`}
-                    onClick={toggleSelectAll}
-                  >
-                    Select All
                   </button>
                   <div className="view-mode-toggle">
                     <button className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')} title="Grid view">
@@ -1398,35 +1594,21 @@ ${url}`);
                     {visibleFolderContents.map((item, idx) => (
                       <div 
                         key={idx} 
-                        className={`fm-item grid-item ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''}`} 
-                        onClick={() => setInspectorItem(item)}
+                        className={`fm-item grid-item ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''} ${dragOverPath === item.path ? 'drag-over' : ''}`} 
+                        onClick={(e) => handleItemClick(e, item)}
                         onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
                         onContextMenu={(e) => handleItemContextMenu(e, item, false)}
+                        draggable
+                        onDragStart={(e) => handleItemDragStart(e, item)}
+                        onDragEnd={() => setDragOverPath(null)}
+                        onDragOver={(e) => handleFolderDragOver(e, item)}
+                        onDragLeave={() => dragOverPath === item.path && setDragOverPath(null)}
+                        onDrop={(e) => handleFolderDrop(e, item)}
                       >
-                        <div 
-                          className={`fm-grid-checkbox ${selectedPaths.includes(item.path) ? 'visible' : ''}`} 
-                          onClick={(e) => toggleSelectItem(item.path, e)}
-                        >
-                          <input 
-                            type="checkbox" 
-                            checked={selectedPaths.includes(item.path)} 
-                            onChange={() => {}} 
-                          />
-                        </div>
-                        <div className="fm-actions-overlay">
-                          <button className={`action-btn star ${item.is_favorite ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFavorite(item, false); }}>
-                            <Star size={14} />
-                          </button>
-                          <button className="action-btn edit" onClick={(e) => { e.stopPropagation(); handleRenameClick(item); }}>
-                            <Edit3 size={14} />
-                          </button>
-                          <button className="action-btn delete" onClick={(e) => { e.stopPropagation(); handleDeleteClick(item); }}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
                         <button 
-                          className="mobile-item-options-btn"
-                          onClick={(e) => { e.stopPropagation(); setMobileActiveItem(item); }}
+                          className="item-options-btn"
+                          onClick={(e) => openItemMenu(e, item)}
+                          title="More options"
                         >
                           <MoreVertical size={14} />
                         </button>
@@ -1457,13 +1639,6 @@ ${url}`);
                     <table className="fm-list-table">
                       <thead>
                         <tr>
-                          <th style={{ width: '40px', paddingLeft: '16px' }}>
-                            <input 
-                              type="checkbox" 
-                              checked={folderContents.length > 0 && folderContents.every(i => selectedPaths.includes(i.path))} 
-                              onChange={toggleSelectAll} 
-                            />
-                          </th>
                           <th>NAME</th>
                           <th>TYPE</th>
                           <th>SIZE</th>
@@ -1475,18 +1650,17 @@ ${url}`);
                         {visibleFolderContents.map((item, idx) => (
                           <tr 
                             key={idx} 
-                            className={`fm-list-row ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''}`}
+                            className={`fm-list-row ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''} ${dragOverPath === item.path ? 'drag-over' : ''}`}
                             onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
-                            onClick={() => setInspectorItem(item)}
+                            onClick={(e) => handleItemClick(e, item)}
                             onContextMenu={(e) => handleItemContextMenu(e, item, false)}
+                            draggable
+                            onDragStart={(e) => handleItemDragStart(e, item)}
+                            onDragEnd={() => setDragOverPath(null)}
+                            onDragOver={(e) => handleFolderDragOver(e, item)}
+                            onDragLeave={() => dragOverPath === item.path && setDragOverPath(null)}
+                            onDrop={(e) => handleFolderDrop(e, item)}
                           >
-                            <td style={{ paddingLeft: '16px', width: '40px' }} onClick={(e) => e.stopPropagation()}>
-                              <input 
-                                type="checkbox" 
-                                checked={selectedPaths.includes(item.path)} 
-                                onChange={(e) => toggleSelectItem(item.path, e)} 
-                              />
-                            </td>
                             <td>
                               <div className="fm-list-name-cell">
                                 {item.type === 'Image' ? (
@@ -1510,20 +1684,10 @@ ${url}`);
                             <td>{new Date(item.modified).toLocaleDateString()}</td>
                             <td>
                               <div className="fm-list-actions">
-                                <div className="fm-list-actions-desktop">
-                                  <button className={`action-btn star ${item.is_favorite ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFavorite(item, false); }}>
-                                    <Star size={14} />
-                                  </button>
-                                  <button className="action-btn edit" onClick={(e) => { e.stopPropagation(); handleRenameClick(item); }}>
-                                    <Edit3 size={14} />
-                                  </button>
-                                  <button className="action-btn delete" onClick={(e) => { e.stopPropagation(); handleDeleteClick(item); }}>
-                                    <Trash2 size={14} />
-                                  </button>
-                                </div>
                                 <button 
-                                  className="mobile-item-options-btn"
-                                  onClick={(e) => { e.stopPropagation(); setMobileActiveItem(item); }}
+                                  className="item-options-btn"
+                                  onClick={(e) => openItemMenu(e, item)}
+                                  title="More options"
                                 >
                                   <MoreVertical size={14} />
                                 </button>
@@ -1545,6 +1709,69 @@ ${url}`);
 
       </main>
 
+      {contextMenu && (
+        <div
+          className="file-context-menu glass"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {(contextMenu.item || selectedPaths.length > 0) && (
+            <>
+              <button type="button" onClick={() => beginClipboardOperation('cut', contextMenu.item)}>
+                <Scissors size={15} />
+                <span>{contextMenu.item ? 'Cut' : 'Cut Selected'}</span>
+              </button>
+              <button type="button" onClick={() => beginClipboardOperation('copy', contextMenu.item)}>
+                <Copy size={15} />
+                <span>{contextMenu.item ? 'Copy' : 'Copy Selected'}</span>
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            disabled={!fileClipboard?.paths?.length}
+            onClick={() => pasteClipboard(contextMenu.item?.type === 'Folder' ? contextMenu.item.path : currentPath)}
+          >
+            <Clipboard size={15} />
+            <span>{contextMenu.item?.type === 'Folder' ? 'Paste into Folder' : 'Paste'}</span>
+          </button>
+          {contextMenu.item && (
+            <>
+              <div className="file-context-divider" />
+              <button type="button" onClick={() => { toggleFavorite(contextMenu.item); closeContextMenu(); }}>
+                <Star size={15} />
+                <span>{contextMenu.item.is_favorite ? "Remove Favorite" : "Add Favorite"}</span>
+              </button>
+              <button type="button" onClick={() => { handleMoveClick(contextMenu.item); closeContextMenu(); }}>
+                <MoveRight size={15} />
+                <span>Move</span>
+              </button>
+              <button type="button" onClick={() => { handleRenameClick(contextMenu.item); closeContextMenu(); }}>
+                <Edit3 size={15} />
+                <span>Rename</span>
+              </button>
+              {contextMenu.item.type !== "Folder" && (
+                <>
+                  <a className="file-context-link" href={authUrl("/api/files/raw", contextMenu.item.path)} onClick={closeContextMenu}>
+                    <Download size={15} />
+                    <span>Download</span>
+                  </a>
+                  <button type="button" onClick={() => { shareItem(contextMenu.item); closeContextMenu(); }}>
+                    <Share2 size={15} />
+                    <span>Share Link</span>
+                  </button>
+                </>
+              )}
+              <button type="button" className="danger" onClick={() => { handleDeleteClick(contextMenu.item); closeContextMenu(); }}>
+                <Trash2 size={15} />
+                <span>Delete</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Rename Modal */}
       {activeModal === 'rename' && selectedItem && (
         <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
@@ -1562,6 +1789,46 @@ ${url}`);
               <div className="modal-footer">
                 <button type="button" className="btn-modal-secondary" onClick={() => setActiveModal(null)}>Cancel</button>
                 <button type="submit" className="btn-modal-primary">Rename</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Move Modal */}
+      {activeModal === 'move' && selectedItem && (
+        <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
+          <div className="modal-content glass" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Move {selectedItem.type}</h3>
+            <p className="modal-text">Choose where to move <strong>{selectedItem.name}</strong>.</p>
+            {moveDestinationOptions.length > 0 && (
+              <div className="move-destination-list">
+                {moveDestinationOptions.map(destination => (
+                  <button
+                    type="button"
+                    className={moveTarget === destination.path ? 'move-destination active' : 'move-destination'}
+                    key={destination.path}
+                    onClick={() => setMoveTarget(destination.path)}
+                    title={destination.path}
+                  >
+                    <Folder size={16} />
+                    <span>{destination.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <form onSubmit={handleMoveSubmit}>
+              <input
+                type="text"
+                className="modal-input"
+                value={moveTarget}
+                onChange={(e) => setMoveTarget(e.target.value)}
+                autoFocus
+                placeholder="Target folder path"
+              />
+              <div className="modal-footer">
+                <button type="button" className="btn-modal-secondary" onClick={() => setActiveModal(null)}>Cancel</button>
+                <button type="submit" className="btn-modal-primary">Move</button>
               </div>
             </form>
           </div>
@@ -1683,69 +1950,39 @@ ${url}`);
         </div>
       )}
 
-      {/* Upload Center Modal */}
-      {activeModal === 'uploadCenter' && (
-        <div className="modal-backdrop" onClick={() => { setUploadQueue([]); setActiveModal(null); }}>
-          <div className="modal-content glass upload-center" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 className="modal-title" style={{ margin: 0 }}>Upload Center</h3>
-              <button className="btn-icon close-btn" onClick={() => { setUploadQueue([]); setActiveModal(null); }}>
-                <Plus size={20} style={{ transform: 'rotate(45deg)' }} />
-              </button>
+      {uploadQueue.length > 0 && (
+        <div className="upload-floating-panel">
+          <div className="upload-floating-header">
+            <strong>{uploadPanelTitle}</strong>
+            <div className="upload-floating-actions">
+              {uploadSummary.active === 0 && (
+                <button className="upload-floating-icon" onClick={() => setUploadQueue([])} title="Clear upload status">
+                  <X size={18} />
+                </button>
+              )}
             </div>
-            
-            <div 
-              className={`dropzone ${isDragging ? 'dragging' : ''}`}
-              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={async (e) => { e.preventDefault(); setIsDragging(false); handleUploadFiles(await collectDroppedFiles(e.dataTransfer)); }}
-            >
-              <CloudUpload size={48} className="dropzone-icon" />
-              <p className="dropzone-text">Drag & drop files or folders here</p>
-              <p className="dropzone-sub">Folder structure is preserved when supported by your browser</p>
-              <div className="upload-choice-row">
-                <button type="button" className="btn-modal-primary" onClick={() => fileInputRef.current.click()}>Choose Files</button>
-                <button type="button" className="btn-modal-secondary" onClick={() => folderInputRef.current.click()}>Choose Folder</button>
+          </div>
+          <div className="upload-floating-body">
+            <Folder size={22} />
+            <div className="upload-floating-file">
+              <span title={uploadPanelName}>{uploadPanelName}</span>
+              <small>{uploadSummary.completed} of {uploadQueue.length} - {formatSize(uploadSummary.loaded)} of {formatSize(uploadSummary.total)}</small>
+            </div>
+            <div className={`upload-ring ${uploadSummary.active === 0 ? 'done' : ''}`} style={{ '--upload-progress': `${uploadProgress}%` }} aria-label={`${uploadProgress}% uploaded`}>
+              <span>{uploadSummary.active === 0 ? <Check size={14} /> : `${uploadProgress}%`}</span>
+            </div>
+          </div>
+          <div className="upload-floating-list">
+            {uploadQueue.slice(0, 5).map((item) => (
+              <div className="upload-floating-item" key={item.id}>
+                <span title={item.name}>{item.name}</span>
+                <small>{item.status === 'completed' ? 'Done' : item.status === 'error' ? 'Error' : `${item.progress}%`}</small>
               </div>
-            </div>
-            
-            {uploadQueue.length > 0 && (
-              <div className="upload-queue-container">
-                <h4 className="queue-title">Upload Progress ({uploadQueue.filter(i => i.status === 'completed').length}/{uploadQueue.length})</h4>
-                <div className="upload-queue-list">
-                  {uploadQueue.map(item => (
-                    <div key={item.id} className="queue-item">
-                      <div className="queue-item-info">
-                        <span className="queue-item-name" title={item.name}>{item.name}</span>
-                        <span className="queue-item-size">{formatSize(item.size)}</span>
-                      </div>
-                      <div className="queue-progress-row">
-                        <div className="queue-progress-track">
-                          <div className={`queue-progress-bar ${item.status}`} style={{ width: `${item.progress}%` }}></div>
-                        </div>
-                        <div className="queue-status-indicator">
-                          {item.status === 'pending' && <span className="status-badge pending">Pending</span>}
-                          {item.status === 'uploading' && <span className="status-badge uploading">{item.progress}%</span>}
-                          {item.status === 'processing' && <span className="status-badge processing"><Loader2 size={12} className="spin" /> Processing</span>}
-                          {item.status === 'completed' && <span className="status-badge completed"><Check size={12} /> Done</span>}
-                          {item.status === 'error' && <span className="status-badge error"><AlertCircle size={12} /> Error</span>}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            <div className="modal-footer" style={{ marginTop: '24px' }}>
-              <button 
-                type="button" 
-                className="btn-modal-secondary" 
-                onClick={() => { setUploadQueue([]); setActiveModal(null); }}
-              >
-                Clear Queue & Close
-              </button>
-            </div>
+            ))}
+            {uploadQueue.length > 5 && <div className="upload-floating-more">+{uploadQueue.length - 5} more</div>}
+          </div>
+          <div className="upload-floating-track">
+            <div style={{ width: `${uploadProgress}%` }}></div>
           </div>
         </div>
       )}
@@ -1827,6 +2064,17 @@ ${url}`);
               >
                 <Edit3 size={16} color="#64748b" />
                 <span>Rename</span>
+              </button>
+
+              <button 
+                className="mobile-sheet-action-btn"
+                onClick={() => {
+                  handleMoveClick(mobileActiveItem);
+                  setMobileActiveItem(null);
+                }}
+              >
+                <MoveRight size={16} color="#64748b" />
+                <span>Move</span>
               </button>
 
               {mobileActiveItem.type !== 'Folder' && (
