@@ -331,10 +331,10 @@ def require_admin(user: dict):
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
 
-def get_item_type(path: str) -> str:
-    if os.path.isdir(path):
+def get_item_type_from_extension(extension: str | None) -> str:
+    ext = (extension or "").lower().replace(".", "")
+    if ext == "directory":
         return "Folder"
-    ext = os.path.splitext(path)[1].lower().replace(".", "")
     if ext in IMAGE_EXTENSIONS:
         return "Image"
     if ext in VIDEO_EXTENSIONS:
@@ -346,6 +346,12 @@ def get_item_type(path: str) -> str:
     if ext in TEXT_EXTENSIONS:
         return "Text"
     return "File"
+
+
+def get_item_type(path: str) -> str:
+    if os.path.isdir(path):
+        return "Folder"
+    return get_item_type_from_extension(os.path.splitext(path)[1])
 
 
 async def log_activity(action: str, path: str | None, actor: str, details: str | None = None):
@@ -549,6 +555,93 @@ async def get_files_list(path: str = STORAGE_ROOT, user: dict = Depends(get_curr
         
     items.sort(key=lambda x: (x["type"] != "Folder", x["name"].lower()))
     return {"items": items}
+
+@app.get("/api/duplicates")
+async def get_duplicate_files(
+    limit: int = Query(default=250, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    user: dict = Depends(get_current_user)
+):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        total_cursor = await db.execute("""
+            SELECT COUNT(*) AS total_groups
+            FROM (
+                SELECT 1
+                FROM files
+                WHERE extension != 'directory'
+                  AND size_bytes > 0
+                GROUP BY LOWER(filename), size_bytes
+                HAVING COUNT(*) > 1
+            ) duplicate_keys
+        """)
+        total_row = await total_cursor.fetchone()
+        total_groups = total_row["total_groups"] if total_row else 0
+
+        cursor = await db.execute("""
+            WITH duplicate_keys AS (
+                SELECT
+                    LOWER(filename) AS name_key,
+                    size_bytes,
+                    COUNT(*) AS duplicate_count,
+                    SUM(size_bytes) AS total_size
+                FROM files
+                WHERE extension != 'directory'
+                  AND size_bytes > 0
+                GROUP BY LOWER(filename), size_bytes
+                HAVING COUNT(*) > 1
+                ORDER BY total_size DESC, duplicate_count DESC, name_key ASC
+                LIMIT ? OFFSET ?
+            )
+            SELECT
+                dk.name_key,
+                dk.duplicate_count,
+                dk.total_size,
+                f.filename,
+                f.filepath,
+                f.extension,
+                f.size_bytes,
+                f.modified_time
+            FROM files f
+            INNER JOIN duplicate_keys dk
+                ON LOWER(f.filename) = dk.name_key
+               AND f.size_bytes = dk.size_bytes
+            WHERE f.extension != 'directory'
+            ORDER BY dk.total_size DESC, dk.duplicate_count DESC, dk.name_key ASC, f.filepath ASC
+        """, (limit, offset))
+        rows = await cursor.fetchall()
+
+    groups_by_key = {}
+    duplicate_groups = []
+    for row in rows:
+        key = (row["name_key"], row["size_bytes"] or 0)
+        if key not in groups_by_key:
+            group = {
+                "id": f"{row['name_key']}::{row['size_bytes'] or 0}",
+                "name": row["filename"],
+                "size": row["size_bytes"] or 0,
+                "count": row["duplicate_count"],
+                "wasted_size": (row["duplicate_count"] - 1) * (row["size_bytes"] or 0),
+                "files": [],
+            }
+            groups_by_key[key] = group
+            duplicate_groups.append(group)
+
+        path = row["filepath"]
+        groups_by_key[key]["files"].append({
+            "name": row["filename"],
+            "path": path,
+            "type": get_item_type_from_extension(row["extension"]),
+            "size": row["size_bytes"] or 0,
+            "modified": row["modified_time"],
+        })
+
+    return {
+        "duplicates": duplicate_groups,
+        "total_groups": total_groups,
+        "limit": limit,
+        "offset": offset,
+    }
 
 @app.get("/api/thumbnail")
 async def get_thumbnail(path: str, user: dict = Depends(get_current_user)):

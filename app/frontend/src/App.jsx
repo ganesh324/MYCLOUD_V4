@@ -92,7 +92,7 @@ function App() {
   const [mobileActiveItem, setMobileActiveItem] = useState(null);
   const [sortBy, setSortBy] = useState('name');
   const [typeFilter, setTypeFilter] = useState('All');
-  const [toolsData, setToolsData] = useState({ trash: [], users: [], activity: [], index: null });
+  const [toolsData, setToolsData] = useState({ trash: [], duplicates: [], duplicatesTotal: 0, users: [], activity: [], index: null });
   const [operationTarget, setOperationTarget] = useState('');
 
   useEffect(() => {
@@ -767,14 +767,15 @@ function App() {
   const loadToolsData = async () => {
     const requests = [
       fetch('/api/trash').then(r => r.ok ? r.json() : { trash: [] }),
+      fetch('/api/duplicates').then(r => r.ok ? r.json() : { duplicates: [] }),
       fetch('/api/activity').then(r => r.ok ? r.json() : { activity: [] }),
       fetch('/api/index/status').then(r => r.ok ? r.json() : null)
     ];
     if (user?.role === 'admin') {
       requests.push(fetch('/api/admin/users').then(r => r.ok ? r.json() : { users: [] }));
     }
-    const [trash, activity, index, users] = await Promise.all(requests);
-    setToolsData({ trash: trash.trash || [], activity: activity.activity || [], index, users: users?.users || [] });
+    const [trash, duplicates, activity, index, users] = await Promise.all(requests);
+    setToolsData({ trash: trash.trash || [], duplicates: duplicates.duplicates || [], duplicatesTotal: duplicates.total_groups || 0, activity: activity.activity || [], index, users: users?.users || [] });
   };
 
   const openTools = async () => {
@@ -808,6 +809,35 @@ function App() {
     setCurrentView('trash');
     setMobileMenuOpen(false);
     await loadTrashView();
+  };
+
+  const loadDuplicatesView = async () => {
+    const res = await fetch('/api/duplicates');
+    const data = res.ok ? await res.json() : { duplicates: [] };
+    setToolsData(prev => ({ ...prev, duplicates: data.duplicates || [], duplicatesTotal: data.total_groups || 0 }));
+  };
+
+  const openDuplicatesView = async () => {
+    setCurrentView('duplicates');
+    setMobileMenuOpen(false);
+    await loadDuplicatesView();
+  };
+
+  const moveDuplicateToTrash = async (item) => {
+    if (!window.confirm(`Move duplicate file ${item.name} to Trash?`)) return;
+    const res = await fetch('/api/files/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: item.path })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || 'Failed to move duplicate to Trash');
+      return;
+    }
+    await loadDuplicatesView();
+    await loadTrashView();
+    fetchStats();
   };
   const runReindex = async () => {
     const res = await fetch('/api/index/reindex', { method: 'POST' });
@@ -1061,6 +1091,14 @@ ${url}`);
           >
             <Trash2 size={20} style={{ minWidth: '20px' }} />
             {!sidebarCollapsed && <span className="nav-text">Trash</span>}
+          </div>
+          <div 
+            className={`nav-item ${currentView === 'duplicates' ? 'active' : ''}`}
+            onClick={openDuplicatesView}
+            title="Duplicates"
+          >
+            <Copy size={20} style={{ minWidth: '20px' }} />
+            {!sidebarCollapsed && <span className="nav-text">Duplicates</span>}
           </div>
         </nav>
 
@@ -1483,6 +1521,49 @@ ${url}`);
                     <button className="btn-modal-secondary" onClick={() => permanentlyDeleteTrashItem(item.id)}>Delete Forever</button>
                   </div>
                 </div>
+              ))}
+            </div>
+          </div>
+        ) : currentView === 'duplicates' ? (
+          <div className="duplicates-view animate-fade-in">
+            <div className="section-header mobile-recent-header">
+              <span>DUPLICATES</span>
+              <button className="btn-modal-secondary" onClick={loadDuplicatesView}>Refresh</button>
+            </div>
+            <div className="duplicate-summary-bar">
+              <span>Showing {toolsData.duplicates.length} of {toolsData.duplicatesTotal || toolsData.duplicates.length} duplicate groups</span>
+              <span>{formatSize(toolsData.duplicates.reduce((total, group) => total + group.wasted_size, 0))} possible cleanup in this view</span>
+            </div>
+            <div className="duplicate-list">
+              {toolsData.duplicates.length === 0 ? (
+                <div className="empty-state">No duplicate candidates found in the SQLite index</div>
+              ) : toolsData.duplicates.map(group => (
+                <section className="duplicate-group" key={group.id}>
+                  <div className="duplicate-group-header">
+                    <div>
+                      <strong>{group.name}</strong>
+                      <span>{group.count} copies • {formatSize(group.size)} each • {formatSize(group.wasted_size)} possible cleanup</span>
+                    </div>
+                  </div>
+                  <div className="duplicate-file-list">
+                    {group.files.map(file => (
+                      <div className="trash-row duplicate-row" key={file.path}>
+                        <div className="trash-info">
+                          {file.type === 'Image' ? <ImageIcon size={22} color="#3a7bd5" /> : <FileText size={22} color="#94a3b8" />}
+                          <div>
+                            <strong>{file.name}</strong>
+                            <span>{file.type} • {formatSize(file.size)} • Modified {formatDate(file.modified)}</span>
+                            <small>{formatDisplayPath(file.path)}</small>
+                          </div>
+                        </div>
+                        <div className="trash-actions">
+                          <button className="btn-modal-secondary" onClick={() => openFolder(getParentPath(file.path))}>Open Folder</button>
+                          <button className="btn-modal-primary" onClick={() => moveDuplicateToTrash(file)}>Move to Trash</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           </div>
@@ -2002,6 +2083,11 @@ ${url}`);
                   </div>
                 ))}
                 {toolsData.trash.length === 0 && <p>No trash items</p>}
+              </section>
+              <section>
+                <h4>Duplicates</h4>
+                <p>{toolsData.duplicatesTotal || toolsData.duplicates.length} groups found from SQLite file info</p>
+                <button className="btn-modal-primary" onClick={() => { setActiveModal(null); openDuplicatesView(); }}>Review</button>
               </section>
               <section>
                 <h4>Index</h4>
