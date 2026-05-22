@@ -1317,7 +1317,7 @@ ${url}`);
             {loadingCategory ? (
               <div className="gallery-loading" style={{ padding: '60px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', color: 'var(--text-muted)' }}>
                 <Loader2 size={36} className="spin" color="var(--primary)" />
-                <span style={{ fontWeight: 500 }}>Scanning drive for {activeCategory.toLowerCase()}...</span>
+                <span style={{ fontWeight: 500 }}>Loading {activeCategory.toLowerCase()}...</span>
               </div>
             ) : categoryFiles.length === 0 ? (
               <div className="empty-state" style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 500 }}>No {activeCategory.toLowerCase()} found on your drive.</div>
@@ -1330,9 +1330,16 @@ ${url}`);
                     onDoubleClick={() => openPreview(item)}
                     title="Double click to preview"
                   >
+                    <div className="mobile-media-card-header">
+                      <ImageIcon size={20} className="mobile-media-card-icon image" />
+                      <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
+                      <button className="mobile-media-card-menu" onClick={(e) => { e.stopPropagation(); openPreview(item); }} title="Preview">
+                        <MoreVertical size={22} />
+                      </button>
+                    </div>
                     <div className="masonry-thumb-container">
                       <img 
-                        src={authUrl('/api/files/raw', item.path)} 
+                        src={authUrl('/api/thumbnail', item.path)} 
                         alt={item.name} 
                         className="masonry-img" 
                         loading="lazy"
@@ -1354,6 +1361,16 @@ ${url}`);
                     onDoubleClick={() => openPreview(item)}
                     style={{ background: 'white', padding: '20px', borderRadius: '16px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', cursor: 'pointer', transition: 'all 0.2s' }}
                   >
+                    <div className="mobile-media-card-header">
+                      {item.type === 'Image' ? <ImageIcon size={20} className="mobile-media-card-icon image" /> :
+                       item.type === 'Video' ? <Video size={20} className="mobile-media-card-icon video" /> :
+                       item.type === 'Music' ? <Music size={20} className="mobile-media-card-icon music" /> :
+                       <FileText size={20} className="mobile-media-card-icon file" />}
+                      <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
+                      <button className="mobile-media-card-menu" onClick={(e) => { e.stopPropagation(); openPreview(item); }} title="Preview">
+                        <MoreVertical size={22} />
+                      </button>
+                    </div>
                     <div className="file-card-icon" style={{ width: '64px', height: '64px', borderRadius: '12px', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {item.type === 'Image' ? <ImageIcon size={32} color="#3a7bd5" /> :
                        item.type === 'Video' ? <Video size={32} color="#8a2387" /> :
@@ -1373,13 +1390,13 @@ ${url}`);
         ) : currentView === 'dashboard' ? (
           <>
             <div className="dashboard-card-grid animate-fade-in">
-              {categoryCards.map(({ label, count, meta, icon: Icon, color, action }) => (
+              {categoryCards.map(({ label, count, icon: Icon, color, action }) => (
                 <button key={label} className="dashboard-type-card" onClick={action} style={{ '--type-accent': color }}>
                   <span className="type-card-accent"></span>
                   <span className="type-card-icon"><Icon size={18} /></span>
                   <span className="type-card-copy">
                     <strong>{label}</strong>
-                    <small>{loading ? 'Loading...' : `${count} ${meta}`}</small>
+                    <small>{loading ? '...' : count}</small>
                   </span>
                 </button>
               ))}
@@ -1470,11 +1487,11 @@ ${url}`);
               <div className="recent-grid">
                 {recent.map((item, index) => (
                   <div key={index} className="recent-grid-card">
-                    <div className="recent-card-icon-wrapper">
-                      {item.type === 'Folder' ? (
+                    <div className={`recent-card-icon-wrapper ${item.type === 'Image' ? 'has-thumbnail' : ''}`}>
+                      {item.type === 'Image' ? (
+                        <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="recent-card-thumbnail" loading="lazy" />
+                      ) : item.type === 'Folder' ? (
                         <Folder size={24} color="#3a7bd5" />
-                      ) : item.type === 'Image' ? (
-                        <ImageIcon size={24} color="#9b59b6" />
                       ) : item.type === 'Video' ? (
                         <Video size={24} color="#e74c3c" />
                       ) : item.type === 'Music' ? (
@@ -1591,45 +1608,22 @@ ${url}`);
                 <span>Drop files or folders into {formatDisplayPath(currentPath)}</span>
               </div>
             )}
-            <div className={`fm-command-band ${selectedPaths.length > 0 ? 'selection-active' : ''}`}>
+            <div className="fm-command-band">
               <div className="fm-command-path">
-                <button className="btn-icon" onClick={selectedPaths.length > 0 ? () => setSelectedPaths([]) : navigateUp} title={selectedPaths.length > 0 ? 'Clear selection' : 'Back'}>
-                  {selectedPaths.length > 0 ? <Plus size={20} style={{ transform: 'rotate(45deg)' }} /> : <ArrowLeft size={20} />}
+                <button className="btn-icon" onClick={navigateUp} title="Back">
+                  <ArrowLeft size={20} />
                 </button>
-                {selectedPaths.length > 0 ? (
-                  <strong>{selectedPaths.length} selected</strong>
-                ) : (
-                  <div className="path-text">
-                    {currentPath.split('/').filter(Boolean).map((part, idx, arr) => (
-                      <span key={idx} className="breadcrumb-part">
-                        {part}
-                        {idx < arr.length - 1 && <ChevronRight size={16} />}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <div className="path-text">
+                  {currentPath.split('/').filter(Boolean).map((part, idx, arr) => (
+                    <span key={idx} className="breadcrumb-part">
+                      {part}
+                      {idx < arr.length - 1 && <ChevronRight size={16} />}
+                    </span>
+                  ))}
+                </div>
               </div>
 
-              {selectedPaths.length > 0 ? (
-                <div className="fm-command-actions selection-actions">
-                  <button className="fm-command-btn primary" onClick={handleBulkDownload} title="Download selected as ZIP">
-                    <Download size={16} />
-                    <span>Download</span>
-                  </button>
-                  <button className="fm-command-btn" onClick={handleBulkFavorite} title="Star selected">
-                    <Star size={16} />
-                    <span>Star</span>
-                  </button>
-                  <input className="batch-target-input" value={operationTarget} onChange={(e) => setOperationTarget(e.target.value)} placeholder="Target folder path" />
-                  <button className="fm-command-btn" onClick={() => operateOnSelected('copy')}>Copy</button>
-                  <button className="fm-command-btn" onClick={() => operateOnSelected('move')}>Move</button>
-                  <button className="fm-command-btn danger" onClick={handleBulkDelete} title="Move selected to Trash">
-                    <Trash2 size={16} />
-                    <span>Delete</span>
-                  </button>
-                </div>
-              ) : (
-                <div className="fm-command-actions">
+              <div className="fm-command-actions">
                   <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                     <option value="name">Sort: Name</option>
                     <option value="modified">Sort: Modified</option>
@@ -1663,7 +1657,6 @@ ${url}`);
                     </button>
                   </div>
                 </div>
-              )}
             </div>
             
             {loadingFolder ? (
@@ -1686,6 +1679,17 @@ ${url}`);
                         onDragLeave={() => dragOverPath === item.path && setDragOverPath(null)}
                         onDrop={(e) => handleFolderDrop(e, item)}
                       >
+                        <div className="mobile-media-card-header">
+                          {item.type === 'Image' ? <ImageIcon size={20} className="mobile-media-card-icon image" /> :
+                           item.type === 'Video' ? <Video size={20} className="mobile-media-card-icon video" /> :
+                           item.type === 'Music' ? <Music size={20} className="mobile-media-card-icon music" /> :
+                           item.type === 'Folder' ? <Folder size={20} className="mobile-media-card-icon folder" /> :
+                           <FileText size={20} className="mobile-media-card-icon file" />}
+                          <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
+                          <button className="mobile-media-card-menu" onClick={(e) => openItemMenu(e, item)} title="More options">
+                            <MoreVertical size={22} />
+                          </button>
+                        </div>
                         <button 
                           className="item-options-btn"
                           onClick={(e) => openItemMenu(e, item)}
@@ -1834,7 +1838,7 @@ ${url}`);
               </button>
               {contextMenu.item.type !== "Folder" && (
                 <>
-                  <a className="file-context-link" href={authUrl("/api/files/raw", contextMenu.item.path)} onClick={closeContextMenu}>
+                  <a className="file-context-link" href={authUrl("/api/files/raw", contextMenu.item.path)} download={contextMenu.item.name} onClick={closeContextMenu}>
                     <Download size={15} />
                     <span>Download</span>
                   </a>
@@ -2167,6 +2171,7 @@ ${url}`);
                 <a 
                   className="mobile-sheet-action-btn"
                   href={authUrl('/api/files/raw', mobileActiveItem.path)}
+                  download={mobileActiveItem.name}
                   onClick={() => setMobileActiveItem(null)}
                 >
                   <Download size={16} color="#64748b" />
