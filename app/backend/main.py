@@ -890,6 +890,66 @@ async def upload_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/api/files/save-edited-image")
+async def save_edited_image(
+    path: str = Form(...),
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user)
+):
+    original_path = resolve_storage_path(path)
+    if not os.path.exists(original_path) or os.path.isdir(original_path):
+        raise HTTPException(status_code=404, detail="Original image not found")
+
+    original_ext = os.path.splitext(original_path)[1].lower().replace(".", "")
+    if original_ext not in IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Original file is not an image")
+
+    parent_dir = os.path.dirname(original_path)
+    original_name = os.path.basename(original_path)
+    stem, _ = os.path.splitext(original_name)
+    content_type = (file.content_type or "").lower()
+    output_ext = "png" if "png" in content_type else "jpg"
+
+    candidate_name = f"{stem}-edited.{output_ext}"
+    target_path = safe_child_path(parent_dir, candidate_name)
+    counter = 2
+    while os.path.exists(target_path):
+        candidate_name = f"{stem}-edited-{counter}.{output_ext}"
+        target_path = safe_child_path(parent_dir, candidate_name)
+        counter += 1
+
+    try:
+        data = await file.read()
+        with Image.open(io.BytesIO(data)) as img:
+            if output_ext == "jpg" and img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(target_path, "PNG" if output_ext == "png" else "JPEG", quality=92)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid edited image: {str(e)}")
+
+    stat_info = os.stat(target_path)
+    size = stat_info.st_size
+    mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
+            VALUES (?, ?, ?, ?, ?)
+        """, (candidate_name, target_path, output_ext, size, mod_time))
+        if user.get("role") != "admin":
+            await db.execute("""
+                INSERT OR REPLACE INTO file_permissions (path, username, permission, granted_by, created_at)
+                VALUES (?, ?, 'full', ?, ?)
+            """, (target_path, user["username"], user["username"], now))
+        await db.commit()
+
+    await log_activity("image_edit_save", target_path, user["username"], original_path)
+    return {"status": "success", "filepath": target_path, "name": candidate_name}
+
 @app.get("/api/files/search")
 async def search_files(q: str = "", user: dict = Depends(get_current_user)):
     if not q:

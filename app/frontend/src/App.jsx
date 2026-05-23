@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { 
   Home, Folder, Star, Share2, Search, Upload, Plus, 
   Menu, MoreVertical, Image as ImageIcon, Video, Music, FileText, ChevronRight, ChevronLeft, ArrowLeft,
-  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, Loader2, Download, AlignLeft, X, MoveRight, Copy, Clipboard, Scissors
+  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, Loader2, Download, AlignLeft, X, MoveRight, Copy, Clipboard, Scissors, RotateCcw, RotateCw, FlipHorizontal, ZoomIn, ZoomOut, Save, Maximize2, Minimize2
 } from 'lucide-react';
 import './App.css';
 import Login from './Login';
@@ -36,6 +36,175 @@ const authUrl = (endpoint, path) => {
 
 const hasMyCloudDragPayload = (dataTransfer) => Array.from(dataTransfer?.types || []).includes('application/x-mycloud-paths');
 
+const getFileExtension = (item = {}) => {
+  const source = item.name || item.path || '';
+  const dotIndex = source.lastIndexOf('.');
+  return dotIndex >= 0 ? source.slice(dotIndex + 1).toLowerCase() : '';
+};
+
+const isArchiveItem = (item = {}) => {
+  const ext = getFileExtension(item);
+  return ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'tgz'].includes(ext);
+};
+
+const isPresentationItem = (item = {}) => {
+  const ext = getFileExtension(item);
+  return ['ppt', 'pptx', 'odp', 'key'].includes(ext);
+};
+
+const isOfficeDataItem = (item = {}) => {
+  const ext = getFileExtension(item);
+  return ['xml', 'sql', 'db', 'sqlite', 'sqlite3', 'parquet', 'avro'].includes(ext);
+};
+
+const isSpreadsheetItem = (item = {}) => {
+  const ext = getFileExtension(item);
+  return ['xls', 'xlsx', 'xlsm', 'csv', 'tsv', 'ods', 'numbers'].includes(ext);
+};
+
+const isDocumentItem = (item = {}) => {
+  const ext = getFileExtension(item);
+  return item.type === 'Text' || ['doc', 'docx', 'rtf', 'odt', 'pages'].includes(ext);
+};
+
+const isFullPreviewImageItem = (item = {}) => {
+  if (item.type !== 'Image') return false;
+  const ext = getFileExtension(item);
+  return !['ico', 'icns', 'svg'].includes(ext);
+};
+
+const GlossyFolderIcon = ({ size = 24, className = '', style }) => (
+  <svg width={size} height={size} viewBox="0 0 72 64" className={className} style={style} aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="folderBodyGradient" x1="14" y1="10" x2="57" y2="62" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#d7f4ff" />
+        <stop offset="0.5" stopColor="#8ccdea" />
+        <stop offset="1" stopColor="#2b79bd" />
+      </linearGradient>
+      <linearGradient id="folderFrontGradient" x1="20" y1="18" x2="53" y2="61" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#dff8ff" />
+        <stop offset="0.45" stopColor="#a9def3" />
+        <stop offset="1" stopColor="#62aad8" />
+      </linearGradient>
+      <linearGradient id="folderShineGradient" x1="22" y1="20" x2="56" y2="52" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#ffffff" stopOpacity="0.72" />
+        <stop offset="1" stopColor="#ffffff" stopOpacity="0.06" />
+      </linearGradient>
+    </defs>
+    <path d="M8 19c0-5 4-9 9-9h15c3 0 5 1 7 4l4 5h12c5 0 9 4 9 9v25c0 5-4 9-9 9H17c-5 0-9-4-9-9z" fill="url(#folderBodyGradient)" stroke="#79bfe2" strokeWidth="2" />
+    <path d="M11 28c1-5 5-8 10-8h16c3 0 5 1 7 4l3 4h14c4 0 7 4 6 8l-5 18c-1 5-5 8-10 8H15c-5 0-8-4-7-9z" fill="url(#folderFrontGradient)" stroke="#7cc0df" strokeWidth="2" />
+    <path d="M15 29c2-3 5-5 9-5h13c3 0 5 1 7 4l2 2h15" fill="none" stroke="#effbff" strokeWidth="3" strokeLinecap="round" opacity="0.7" />
+    <path d="M17 31h39c3 0 5 3 4 6l-4 14c-1 3-3 5-6 5H17c-3 0-5-3-4-6z" fill="url(#folderShineGradient)" opacity="0.9" />
+  </svg>
+);
+
+const SpreadsheetFileIcon = ({ size = 24, className = '', style }) => (
+  <svg width={size} height={size} viewBox="0 0 64 64" className={className} style={style} aria-hidden="true" focusable="false">
+    <path d="M16 3h29l11 11v43a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4z" fill="#25a968" />
+    <path d="M45 3v13a4 4 0 0 0 4 4h7z" fill="#a8dec4" />
+    <path d="M56 20 45 31V20z" fill="#16894f" opacity="0.65" />
+    <rect x="23" y="32" width="25" height="19" rx="2" fill="#ffffff" />
+    <path d="M27 37h7M39 37h6M27 43h7M39 43h6M27 49h7M39 49h6" stroke="#25a968" strokeWidth="4" strokeLinecap="square" />
+  </svg>
+);
+
+const PdfFileIcon = ({ size = 24, className = '', style }) => (
+  <svg width={size} height={size} viewBox="0 0 64 64" className={className} style={style} aria-hidden="true" focusable="false">
+    <path d="M18 4h24l14 14v38a4 4 0 0 1-4 4H18a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4z" fill="#fff" stroke="#ff2727" strokeWidth="4" />
+    <path d="M42 4v13a3 3 0 0 0 3 3h11" fill="none" stroke="#ff2727" strokeWidth="4" strokeLinejoin="round" />
+    <path d="M24 19h20M24 26h20M24 33h20" stroke="#94a3b8" strokeWidth="2.4" strokeLinecap="round" />
+    <rect x="8" y="37" width="38" height="16" rx="2" fill="#ff2727" />
+    <text x="27" y="49" fill="#fff" fontSize="12" fontWeight="800" fontFamily="Inter, Arial, sans-serif" textAnchor="middle">PDF</text>
+  </svg>
+);
+
+const DocsFileIcon = ({ size = 24, className = '', style }) => (
+  <svg width={size} height={size} viewBox="0 0 64 64" className={className} style={style} aria-hidden="true" focusable="false">
+    <path d="M16 5h28l12 12v42H16z" fill="#1395f6" stroke="#111827" strokeWidth="5" strokeLinejoin="round" />
+    <path d="M44 5v13h12" fill="#dff2ff" stroke="#111827" strokeWidth="5" strokeLinejoin="round" />
+    <path d="M24 34h24M24 42h24M24 50h17" stroke="#0f172a" strokeWidth="4.5" strokeLinecap="round" />
+  </svg>
+);
+
+const ArchiveFileIcon = ({ size = 24, className = '', style }) => (
+  <svg width={size} height={size} viewBox="0 0 72 64" className={className} style={style} aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="archiveBodyGradient" x1="16" y1="8" x2="58" y2="59" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#d6f3ff" />
+        <stop offset="0.52" stopColor="#9dd8ef" />
+        <stop offset="1" stopColor="#5aa6d7" />
+      </linearGradient>
+      <linearGradient id="archiveShineGradient" x1="24" y1="14" x2="56" y2="48" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#ffffff" stopOpacity="0.62" />
+        <stop offset="1" stopColor="#ffffff" stopOpacity="0.08" />
+      </linearGradient>
+    </defs>
+    <path d="M8 20c0-5 4-9 9-9h38c5 0 9 4 9 9v33c0 5-4 9-9 9H17c-5 0-9-4-9-9z" fill="url(#archiveBodyGradient)" stroke="#7fc3e2" strokeWidth="2" />
+    <path d="M14 18h45v8H14z" fill="#c8edfb" opacity="0.78" />
+    <path d="M16 13v48" stroke="#4f93bd" strokeWidth="5" opacity="0.5" />
+    <path d="M20 13v48" stroke="#e5edf2" strokeWidth="3" />
+    <path d="M20 16h5M20 22h5M20 28h5M20 34h5M20 40h5M20 46h5M20 52h5" stroke="#4b5563" strokeWidth="2" strokeLinecap="round" />
+    <rect x="54" y="9" width="9" height="13" rx="3" fill="#d9dde2" stroke="#6b7280" strokeWidth="1.5" />
+    <path d="M56 15h5" stroke="#6b7280" strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M29 18h26c3 0 5 2 5 5v25c0 4-3 7-7 7H29z" fill="url(#archiveShineGradient)" opacity="0.75" />
+  </svg>
+);
+
+const PresentationFileIcon = ({ size = 24, className = '', style }) => (
+  <svg width={size} height={size} viewBox="0 0 64 64" className={className} style={style} aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="presentationBgGradient" x1="14" y1="8" x2="55" y2="57" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#ffcf64" />
+        <stop offset="0.45" stopColor="#ff6a4c" />
+        <stop offset="1" stopColor="#e91e63" />
+      </linearGradient>
+      <linearGradient id="presentationTileGradient" x1="8" y1="32" x2="32" y2="57" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#ef334b" />
+        <stop offset="1" stopColor="#9f1028" />
+      </linearGradient>
+    </defs>
+    <path d="M35 4c14 0 25 11 25 25 0 17-13 31-31 31C15 60 4 49 4 35 4 18 18 4 35 4z" fill="url(#presentationBgGradient)" />
+    <path d="M33 12h13a10 10 0 0 1 10 10v11H42a9 9 0 0 1-9-9z" fill="#ffb45d" opacity="0.7" />
+    <rect x="6" y="31" width="29" height="27" rx="6" fill="url(#presentationTileGradient)" />
+    <text x="20.5" y="50" fill="#ffffff" fontSize="23" fontWeight="850" fontFamily="Inter, Arial, sans-serif" textAnchor="middle">P</text>
+  </svg>
+);
+
+const OfficeDataFileIcon = ({ size = 24, className = '', style }) => (
+  <svg width={size} height={size} viewBox="0 0 64 64" className={className} style={style} aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="dataBlueGradient" x1="16" y1="5" x2="48" y2="59" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#d8f2ff" />
+        <stop offset="0.5" stopColor="#9ed3ee" />
+        <stop offset="1" stopColor="#5d9fcc" />
+      </linearGradient>
+      <linearGradient id="dataShineGradient" x1="20" y1="6" x2="48" y2="25" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#ffffff" stopOpacity="0.82" />
+        <stop offset="1" stopColor="#ffffff" stopOpacity="0.08" />
+      </linearGradient>
+    </defs>
+    <ellipse cx="32" cy="12" rx="22" ry="8" fill="#caeaff" stroke="#8cc8e8" strokeWidth="2" />
+    <path d="M10 12v40c0 5 10 9 22 9s22-4 22-9V12c0 5-10 9-22 9s-22-4-22-9z" fill="url(#dataBlueGradient)" stroke="#8cc8e8" strokeWidth="2" />
+    <path d="M10 25c0 5 10 9 22 9s22-4 22-9M10 38c0 5 10 9 22 9s22-4 22-9M10 51c0 5 10 9 22 9s22-4 22-9" fill="none" stroke="#f8fdff" strokeWidth="3" opacity="0.9" />
+    <ellipse cx="32" cy="12" rx="17" ry="5" fill="url(#dataShineGradient)" />
+    <path d="M18 17c6 3 22 3 28 0" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" opacity="0.7" />
+  </svg>
+);
+
+const ItemTypeIcon = ({ item = {}, size = 20, className = '', style, color }) => {
+  if (item.type === 'Folder') return <GlossyFolderIcon size={size} className={className} style={style} />;
+  if (item.type === 'Image') return <ImageIcon size={size} color={color || '#3a7bd5'} className={className} style={style} />;
+  if (item.type === 'Video') return <Video size={size} color={color || '#8a2387'} className={className} style={style} />;
+  if (item.type === 'Music') return <Music size={size} color={color || '#10b981'} className={className} style={style} />;
+  if (item.type === 'PDF') return <PdfFileIcon size={size} className={className} style={style} />;
+  if (isArchiveItem(item)) return <ArchiveFileIcon size={size} className={className} style={style} />;
+  if (isPresentationItem(item)) return <PresentationFileIcon size={size} className={className} style={style} />;
+  if (isOfficeDataItem(item)) return <OfficeDataFileIcon size={size} className={className} style={style} />;
+  if (isSpreadsheetItem(item)) return <SpreadsheetFileIcon size={size} className={className} style={style} />;
+  if (isDocumentItem(item)) return <DocsFileIcon size={size} className={className} style={style} />;
+  return <FileText size={size} color={color || '#94a3b8'} className={className} style={style} />;
+};
+
 function App() {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -56,6 +225,7 @@ function App() {
   const [folderContents, setFolderContents] = useState([]);
   const [loadingFolder, setLoadingFolder] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
+  const [isMobileViewport, setIsMobileViewport] = useState(() => window.matchMedia('(max-width: 768px)').matches);
   const [activeModal, setActiveModal] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [renameInput, setRenameInput] = useState('');
@@ -68,6 +238,13 @@ function App() {
   const [previewItem, setPreviewItem] = useState(null);
   const [previewTextContent, setPreviewTextContent] = useState('');
   const [loadingPreviewText, setLoadingPreviewText] = useState(false);
+  const [imageEditMode, setImageEditMode] = useState(false);
+  const [imageTransform, setImageTransform] = useState({ rotate: 0, flipX: false, zoom: 1 });
+  const [savingEditedImage, setSavingEditedImage] = useState(false);
+  const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
+  const previewContentRef = useRef(null);
+  const editCanvasRef = useRef(null);
+  const editImageRef = useRef(null);
 
   // Folder & Upload States
   const [newFolderName, setNewFolderName] = useState('');
@@ -98,6 +275,33 @@ function App() {
   useEffect(() => {
     currentPathRef.current = currentPath;
   }, [currentPath]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 768px)');
+    const handleViewportChange = (event) => {
+      setIsMobileViewport(event.matches);
+      if (event.matches) setViewMode('grid');
+    };
+
+    setIsMobileViewport(mediaQuery.matches);
+    if (mediaQuery.matches) setViewMode('grid');
+    mediaQuery.addEventListener('change', handleViewportChange);
+    return () => mediaQuery.removeEventListener('change', handleViewportChange);
+  }, []);
+
+  useEffect(() => {
+    if (imageEditMode && previewItem?.type === 'Image') {
+      drawEditedImage();
+    }
+  }, [imageEditMode, imageTransform, previewItem]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsPreviewFullscreen(document.fullscreenElement === previewContentRef.current);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const openFolder = async (path) => {
     setCurrentView('fileManager');
@@ -341,7 +545,100 @@ function App() {
     }
   };
 
+  const resetImageEditor = () => {
+    setImageEditMode(false);
+    setImageTransform({ rotate: 0, flipX: false, zoom: 1 });
+    setSavingEditedImage(false);
+  };
+
+  const closePreview = () => {
+    if (document.fullscreenElement === previewContentRef.current) {
+      document.exitFullscreen().catch(() => {});
+    }
+    setPreviewItem(null);
+    resetImageEditor();
+  };
+
+  const togglePreviewFullscreen = async () => {
+    const viewer = previewContentRef.current;
+    if (!viewer) return;
+
+    try {
+      if (document.fullscreenElement === viewer) {
+        await document.exitFullscreen();
+      } else if (viewer.requestFullscreen) {
+        await viewer.requestFullscreen();
+      } else {
+        setIsPreviewFullscreen(prev => !prev);
+      }
+    } catch (error) {
+      setIsPreviewFullscreen(prev => !prev);
+    }
+  };
+
+  const drawEditedImage = () => {
+    const canvas = editCanvasRef.current;
+    const img = editImageRef.current;
+    if (!canvas || !img || !img.complete || !img.naturalWidth) return;
+
+    const width = img.naturalWidth;
+    const height = img.naturalHeight;
+    const rotation = ((imageTransform.rotate % 360) + 360) % 360;
+    const swapped = rotation === 90 || rotation === 270;
+    canvas.width = swapped ? height : width;
+    canvas.height = swapped ? width : height;
+
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((rotation * Math.PI) / 180);
+    ctx.scale(imageTransform.flipX ? -1 : 1, 1);
+    const zoom = Math.max(0.4, Math.min(3, imageTransform.zoom));
+    ctx.drawImage(img, -(width * zoom) / 2, -(height * zoom) / 2, width * zoom, height * zoom);
+    ctx.restore();
+  };
+
+  const updateImageTransform = (patch) => {
+    setImageTransform(prev => ({ ...prev, ...patch }));
+  };
+
+  const saveEditedImageCopy = async () => {
+    const canvas = editCanvasRef.current;
+    if (!canvas || !previewItem || savingEditedImage) return;
+    setSavingEditedImage(true);
+
+    try {
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      if (!blob) throw new Error('Could not export edited image');
+
+      const formData = new FormData();
+      formData.append('path', previewItem.path);
+      formData.append('file', blob, 'edited.jpg');
+
+      const res = await fetch('/api/files/save-edited-image', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || 'Failed to save edited image');
+
+      alert(`Saved ${data.name || 'edited image'}`);
+      resetImageEditor();
+      if (currentPathRef.current === currentPath) openFolder(currentPathRef.current);
+      if (currentView === 'categoryGallery' && activeCategory) openCategory(activeCategory);
+      fetchStats();
+    } catch (error) {
+      alert(error.message || 'Failed to save edited image');
+    } finally {
+      setSavingEditedImage(false);
+    }
+  };
+
   const openPreview = async (item) => {
+    resetImageEditor();
     setPreviewItem(item);
     if (item.type === 'Text') {
       setLoadingPreviewText(true);
@@ -943,6 +1240,7 @@ ${url}`);
   ];
   const storageRoot = appConfig.storage_root || '/mnt/Drive1';
   const storageLabel = appConfig.storage_label || 'Drive1';
+  const effectiveViewMode = isMobileViewport ? 'grid' : viewMode;
   const formatDisplayPath = (path) => (path || '').replace(storageRoot, storageLabel);
   const uploadSummary = uploadQueue.reduce((acc, item) => {
     acc.total += item.size || 0;
@@ -1020,7 +1318,7 @@ ${url}`);
                     title={item.path}
                   >
                     <ChevronRight size={13} className="explorer-caret" />
-                    <Folder size={15} />
+                    <ItemTypeIcon item={item} size={17} />
                     <span>{item.name}</span>
                   </button>
                 ))}
@@ -1034,7 +1332,7 @@ ${url}`);
                     title={folder.path}
                   >
                     <ChevronRight size={13} className="explorer-caret muted" />
-                    <Folder size={15} />
+                    <ItemTypeIcon item={folder} size={17} />
                     <span>{folder.name}</span>
                   </button>
                 ))}
@@ -1186,12 +1484,7 @@ ${url}`);
                       }}
                     >
                       <div className="search-result-icon">
-                        {item.type === 'Folder' ? <Folder size={16} color="#1abc9c" /> :
-                         item.type === 'Image' ? <ImageIcon size={16} color="#3a7bd5" /> :
-                         item.type === 'Video' ? <Video size={16} color="#8a2387" /> :
-                         item.type === 'Music' ? <Music size={16} color="#10b981" /> :
-                         item.type === 'PDF' ? <FileText size={16} color="#ff3838" /> :
-                         <FileText size={16} color="#64748b" />}
+                        <ItemTypeIcon item={item} size={16} color={item.type === 'Folder' ? '#1abc9c' : undefined} />
                       </div>
                       <div className="search-result-info">
                         <span className="search-result-name">{item.name}</span>
@@ -1362,21 +1655,14 @@ ${url}`);
                     style={{ background: 'white', padding: '20px', borderRadius: '16px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', cursor: 'pointer', transition: 'all 0.2s' }}
                   >
                     <div className="mobile-media-card-header">
-                      {item.type === 'Image' ? <ImageIcon size={20} className="mobile-media-card-icon image" /> :
-                       item.type === 'Video' ? <Video size={20} className="mobile-media-card-icon video" /> :
-                       item.type === 'Music' ? <Music size={20} className="mobile-media-card-icon music" /> :
-                       <FileText size={20} className="mobile-media-card-icon file" />}
+                      <ItemTypeIcon item={item} size={20} className={`mobile-media-card-icon ${item.type === 'File' || item.type === 'PDF' || item.type === 'Text' ? 'file' : item.type.toLowerCase()}`} />
                       <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
                       <button className="mobile-media-card-menu" onClick={(e) => { e.stopPropagation(); openPreview(item); }} title="Preview">
                         <MoreVertical size={22} />
                       </button>
                     </div>
                     <div className="file-card-icon" style={{ width: '64px', height: '64px', borderRadius: '12px', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {item.type === 'Image' ? <ImageIcon size={32} color="#3a7bd5" /> :
-                       item.type === 'Video' ? <Video size={32} color="#8a2387" /> :
-                       item.type === 'Music' ? <Music size={32} color="#10b981" /> :
-                       item.type === 'PDF' ? <FileText size={32} color="#ff3838" /> :
-                       <FileText size={32} color="#64748b" />}
+                      <ItemTypeIcon item={item} size={42} />
                     </div>
                     <div className="file-card-info" style={{ textAlign: 'center', width: '100%' }}>
                       <span className="file-card-name" title={item.name} style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
@@ -1412,7 +1698,7 @@ ${url}`);
           <div className="favorites-grid animate-fade-in">
             {favoriteFolders.map((folder, idx) => (
               <div key={idx} className="favorite-folder-card" onClick={() => openFolder(folder.path)}>
-                <Folder size={24} className="favorite-folder-icon" />
+                <ItemTypeIcon item={folder} size={30} className="favorite-folder-icon" />
                 <div className="favorite-folder-info">
                   <span className="favorite-folder-name">{folder.name}</span>
                   <span className="favorite-folder-type">Folder</span>
@@ -1452,17 +1738,7 @@ ${url}`);
                       <tr key={index} className="recent-row">
                         <td>
                           <div className="name-cell" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            {item.type === 'Folder' ? (
-                              <Folder size={18} color="#3a7bd5" style={{ flexShrink: 0 }} />
-                            ) : item.type === 'Image' ? (
-                              <ImageIcon size={18} color="#9b59b6" style={{ flexShrink: 0 }} />
-                            ) : item.type === 'Video' ? (
-                              <Video size={18} color="#e74c3c" style={{ flexShrink: 0 }} />
-                            ) : item.type === 'Music' ? (
-                              <Music size={18} color="#2ecc71" style={{ flexShrink: 0 }} />
-                            ) : (
-                              <FileText size={18} color="#94a3b8" style={{ flexShrink: 0 }} />
-                            )}
+                            <ItemTypeIcon item={item} size={18} style={{ flexShrink: 0 }} />
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
                           </div>
                         </td>
@@ -1490,14 +1766,8 @@ ${url}`);
                     <div className={`recent-card-icon-wrapper ${item.type === 'Image' ? 'has-thumbnail' : ''}`}>
                       {item.type === 'Image' ? (
                         <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="recent-card-thumbnail" loading="lazy" />
-                      ) : item.type === 'Folder' ? (
-                        <Folder size={24} color="#3a7bd5" />
-                      ) : item.type === 'Video' ? (
-                        <Video size={24} color="#e74c3c" />
-                      ) : item.type === 'Music' ? (
-                        <Music size={24} color="#2ecc71" />
                       ) : (
-                        <FileText size={24} color="#94a3b8" />
+                        <ItemTypeIcon item={item} size={30} />
                       )}
                     </div>
                     <div className="recent-card-details">
@@ -1526,7 +1796,7 @@ ${url}`);
               ) : toolsData.trash.map(item => (
                 <div className="trash-row" key={item.id}>
                   <div className="trash-info">
-                    {item.type === 'Folder' ? <Folder size={22} color="var(--primary)" /> : <FileText size={22} color="#94a3b8" />}
+                    <ItemTypeIcon item={item} size={24} />
                     <div>
                       <strong>{item.name}</strong>
                       <span>{item.type} • Deleted {new Date(item.deleted_at).toLocaleString()}</span>
@@ -1566,7 +1836,7 @@ ${url}`);
                     {group.files.map(file => (
                       <div className="trash-row duplicate-row" key={file.path}>
                         <div className="trash-info">
-                          {file.type === 'Image' ? <ImageIcon size={22} color="#3a7bd5" /> : <FileText size={22} color="#94a3b8" />}
+                          <ItemTypeIcon item={file} size={24} />
                           <div>
                             <strong>{file.name}</strong>
                             <span>{file.type} • {formatSize(file.size)} • Modified {formatDate(file.modified)}</span>
@@ -1648,11 +1918,11 @@ ${url}`);
                     <CloudUpload size={16} />
                     <span>Upload</span>
                   </button>
-                  <div className="view-mode-toggle">
-                    <button className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')} title="Grid view">
+                  <div className="view-mode-toggle desktop-only-view-toggle">
+                    <button className={`btn-icon ${effectiveViewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')} title="Grid view">
                       <LayoutGrid size={18} />
                     </button>
-                    <button className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')} title="List view">
+                    <button className={`btn-icon ${effectiveViewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')} title="List view">
                       <List size={18} />
                     </button>
                   </div>
@@ -1663,12 +1933,12 @@ ${url}`);
               <div className="loading-state">Loading folder contents...</div>
             ) : (
               <>
-                {viewMode === 'grid' ? (
+                {effectiveViewMode === 'grid' ? (
                   <div className="fm-grid">
                     {visibleFolderContents.map((item, idx) => (
                       <div 
                         key={idx} 
-                        className={`fm-item grid-item ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''} ${dragOverPath === item.path ? 'drag-over' : ''}`} 
+                        className={`fm-item grid-item ${item.type === 'Folder' ? 'is-folder' : ''} ${isFullPreviewImageItem(item) ? 'is-image' : 'is-compact'} ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''} ${dragOverPath === item.path ? 'drag-over' : ''}`} 
                         onClick={(e) => handleItemClick(e, item)}
                         onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
                         onContextMenu={(e) => handleItemContextMenu(e, item, false)}
@@ -1680,11 +1950,7 @@ ${url}`);
                         onDrop={(e) => handleFolderDrop(e, item)}
                       >
                         <div className="mobile-media-card-header">
-                          {item.type === 'Image' ? <ImageIcon size={20} className="mobile-media-card-icon image" /> :
-                           item.type === 'Video' ? <Video size={20} className="mobile-media-card-icon video" /> :
-                           item.type === 'Music' ? <Music size={20} className="mobile-media-card-icon music" /> :
-                           item.type === 'Folder' ? <Folder size={20} className="mobile-media-card-icon folder" /> :
-                           <FileText size={20} className="mobile-media-card-icon file" />}
+                          <ItemTypeIcon item={item} size={20} className={`mobile-media-card-icon ${item.type === 'File' || item.type === 'PDF' || item.type === 'Text' ? 'file' : item.type.toLowerCase()}`} />
                           <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
                           <button className="mobile-media-card-menu" onClick={(e) => openItemMenu(e, item)} title="More options">
                             <MoreVertical size={22} />
@@ -1698,21 +1964,13 @@ ${url}`);
                           <MoreVertical size={14} />
                         </button>
                         
-                        {item.type === 'Image' ? (
+                        {isFullPreviewImageItem(item) ? (
                           <div className="fm-thumbnail-container">
                             <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="fm-thumbnail" loading="lazy" />
                           </div>
                         ) : (
                           <div className="fm-icon-container">
-                            {item.type === 'Folder' ? (
-                              <Folder size={48} color="#3a7bd5" className="fm-icon" />
-                            ) : item.type === 'Video' ? (
-                              <Video size={48} color="#9b59b6" className="fm-icon" />
-                            ) : item.type === 'Music' ? (
-                              <Music size={48} color="#2ecc71" className="fm-icon" />
-                            ) : (
-                              <FileText size={48} color="#94a3b8" className="fm-icon" />
-                            )}
+                            <ItemTypeIcon item={item} size={52} className="fm-icon" />
                           </div>
                         )}
                         <div className="fm-item-name" title={item.name}>{item.name}</div>
@@ -1752,14 +2010,8 @@ ${url}`);
                                   <div className="fm-list-thumbnail-container">
                                     <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="fm-list-thumbnail" loading="lazy" />
                                   </div>
-                                ) : item.type === 'Folder' ? (
-                                  <Folder size={20} color="#3a7bd5" />
-                                ) : item.type === 'Video' ? (
-                                  <Video size={20} color="#9b59b6" />
-                                ) : item.type === 'Music' ? (
-                                  <Music size={20} color="#2ecc71" />
                                 ) : (
-                                  <FileText size={20} color="#94a3b8" />
+                                  <ItemTypeIcon item={item} size={22} />
                                 )}
                                 <span className="fm-list-item-name" title={item.name}>{item.name}</span>
                               </div>
@@ -1896,7 +2148,7 @@ ${url}`);
                     onClick={() => setMoveTarget(destination.path)}
                     title={destination.path}
                   >
-                    <Folder size={16} />
+                    <ItemTypeIcon item={{ ...destination, type: 'Folder' }} size={18} />
                     <span>{destination.name}</span>
                   </button>
                 ))}
@@ -1936,14 +2188,26 @@ ${url}`);
 
       {/* File Preview Modal */}
       {previewItem && (
-        <div className="preview-backdrop" onClick={() => setPreviewItem(null)}>
-          <div className="preview-content glass" onClick={(e) => e.stopPropagation()}>
+        <div className="preview-backdrop" onClick={closePreview}>
+          <div ref={previewContentRef} className={`preview-content glass ${isPreviewFullscreen ? 'preview-content-fullscreen' : ''}`} onClick={(e) => e.stopPropagation()}>
             <div className="preview-header">
               <div className="preview-title-info">
                 <span className="preview-badge">{previewItem.type}</span>
                 <span className="preview-filename" title={previewItem.name}>{previewItem.name}</span>
               </div>
               <div className="preview-actions">
+                {previewItem.type === 'Image' && !imageEditMode && (
+                  <button className="btn-modal-secondary preview-edit-btn" onClick={() => setImageEditMode(true)}>
+                    <Edit3 size={16} />
+                    <span>Edit</span>
+                  </button>
+                )}
+                {previewItem.type === 'Image' && (
+                  <button className="btn-modal-secondary preview-fullscreen-btn" onClick={togglePreviewFullscreen}>
+                    {isPreviewFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                    <span>{isPreviewFullscreen ? 'Exit Full' : 'Full Screen'}</span>
+                  </button>
+                )}
                 <a 
                   href={authUrl('/api/files/raw', previewItem.path)} 
                   download={previewItem.name} 
@@ -1952,16 +2216,43 @@ ${url}`);
                 >
                   Download
                 </a>
-                <button className="btn-icon close-btn" onClick={() => setPreviewItem(null)}>
+                <button className="btn-icon close-btn" onClick={closePreview}>
                   <Plus size={20} style={{ transform: 'rotate(45deg)' }} />
                 </button>
               </div>
             </div>
             <div className="preview-body">
               {previewItem.type === 'Image' ? (
-                <div className="preview-media-container">
-                  <img src={authUrl('/api/files/raw', previewItem.path)} alt={previewItem.name} className="preview-image" />
-                </div>
+                imageEditMode ? (
+                  <div className="image-editor-shell">
+                    <img
+                      ref={editImageRef}
+                      src={authUrl('/api/files/raw', previewItem.path)}
+                      alt=""
+                      crossOrigin="anonymous"
+                      className="image-editor-source"
+                      onLoad={drawEditedImage}
+                    />
+                    <div className="image-editor-canvas-wrap">
+                      <canvas ref={editCanvasRef} className="image-editor-canvas" />
+                    </div>
+                    <div className="image-editor-toolbar">
+                      <button onClick={() => updateImageTransform({ rotate: imageTransform.rotate - 90 })} title="Rotate left"><RotateCcw size={16} /><span>Left</span></button>
+                      <button onClick={() => updateImageTransform({ rotate: imageTransform.rotate + 90 })} title="Rotate right"><RotateCw size={16} /><span>Right</span></button>
+                      <button onClick={() => updateImageTransform({ flipX: !imageTransform.flipX })} title="Flip horizontal"><FlipHorizontal size={16} /><span>Flip</span></button>
+                      <button onClick={() => updateImageTransform({ zoom: Math.max(0.5, +(imageTransform.zoom - 0.1).toFixed(2)) })} title="Zoom out"><ZoomOut size={16} /></button>
+                      <span className="image-editor-zoom">{Math.round(imageTransform.zoom * 100)}%</span>
+                      <button onClick={() => updateImageTransform({ zoom: Math.min(3, +(imageTransform.zoom + 0.1).toFixed(2)) })} title="Zoom in"><ZoomIn size={16} /></button>
+                      <button onClick={() => setImageTransform({ rotate: 0, flipX: false, zoom: 1 })}>Reset</button>
+                      <button className="primary" onClick={saveEditedImageCopy} disabled={savingEditedImage}><Save size={16} /><span>{savingEditedImage ? 'Saving...' : 'Save Copy'}</span></button>
+                      <button onClick={resetImageEditor}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="preview-media-container">
+                    <img src={authUrl('/api/files/raw', previewItem.path)} alt={previewItem.name} className="preview-image" />
+                  </div>
+                )
               ) : previewItem.type === 'PDF' ? (
                 <iframe 
                   src={authUrl('/api/files/raw', previewItem.path)} 
@@ -1994,7 +2285,7 @@ ${url}`);
                 </div>
               ) : (
                 <div className="preview-unsupported">
-                  <FileText size={64} color="var(--text-muted)" />
+                  <ItemTypeIcon item={previewItem} size={64} color="var(--text-muted)" />
                   <p>Previews are not supported for this file type.</p>
                   <a 
                     href={authUrl('/api/files/raw', previewItem.path)} 
@@ -2121,11 +2412,7 @@ ${url}`);
           <div className="mobile-bottom-sheet glass">
             <div className="mobile-sheet-header">
               <div className="mobile-sheet-icon-wrapper">
-                {mobileActiveItem.type === 'Folder' ? <Folder size={20} color="#3a7bd5" /> :
-                 mobileActiveItem.type === 'Image' ? <ImageIcon size={20} color="#3a7bd5" /> :
-                 mobileActiveItem.type === 'Video' ? <Video size={20} color="#8a2387" /> :
-                 mobileActiveItem.type === 'Music' ? <Music size={20} color="#10b981" /> :
-                 <FileText size={20} color="#94a3b8" />}
+                <ItemTypeIcon item={mobileActiveItem} size={22} />
               </div>
               <div className="mobile-sheet-title-info">
                 <span className="mobile-sheet-name">{mobileActiveItem.name}</span>

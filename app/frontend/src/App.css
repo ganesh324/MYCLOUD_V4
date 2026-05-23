@@ -1047,6 +1047,42 @@
   backdrop-filter: blur(20px);
 }
 
+
+.preview-content-fullscreen,
+.preview-content:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  background: #ffffff;
+}
+
+.preview-content-fullscreen .preview-header,
+.preview-content:fullscreen .preview-header {
+  flex: 0 0 auto;
+}
+
+.preview-content-fullscreen .preview-body,
+.preview-content:fullscreen .preview-body {
+  padding: 12px;
+  background: #0f172a;
+}
+
+.preview-content-fullscreen .preview-image,
+.preview-content:fullscreen .preview-image {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.preview-fullscreen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .preview-header {
   display: flex;
   justify-content: space-between;
@@ -6066,3 +6102,313 @@ body,
   color: color-mix(in srgb, var(--type-accent) 62%, #1f2937 38%) !important;
 }
 
+.preview-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.image-editor-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.image-editor-source {
+  display: none;
+}
+
+.image-editor-canvas-wrap {
+  min-height: 0;
+  border-radius: 12px;
+  background: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.image-editor-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  display: block;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+.image-editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.image-editor-toolbar button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.image-editor-toolbar button:hover:not(:disabled) {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 30%, white 70%);
+  background: #f8fafc;
+}
+
+.image-editor-toolbar button.primary {
+  color: #ffffff;
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.image-editor-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.image-editor-zoom {
+  min-width: 44px;
+  color: #475569;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+@media (max-width: 768px) {
+  .preview-actions {
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .preview-fullscreen-btn span {
+    display: none;
+  }
+
+
+  .image-editor-toolbar {
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+
+  .image-editor-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .image-editor-toolbar button {
+    flex: 0 0 auto;
+  }
+}
+
+/* Mobile folder cards: keep media cards full-width, but make folders compact two-up. */
+@media (max-width: 768px) {
+  .fm-grid {
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: stretch !important;
+  }
+
+  .fm-grid .fm-item.grid-item {
+    flex: 1 0 100% !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder {
+    flex: 0 0 calc(50% - 8px) !important;
+    width: calc(50% - 8px) !important;
+    max-width: calc(50% - 8px) !important;
+    min-height: 142px !important;
+    padding: 10px !important;
+    border-radius: 16px !important;
+    gap: 8px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .mobile-media-card-header {
+    grid-template-columns: 28px minmax(0, 1fr) 26px !important;
+    gap: 6px !important;
+    min-height: 30px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .mobile-media-card-name {
+    font-size: 0.82rem !important;
+    font-weight: 800 !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .mobile-media-card-menu {
+    width: 26px !important;
+    height: 26px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .fm-icon-container {
+    height: 76px !important;
+    border-radius: 10px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .fm-icon-container svg {
+    width: 48px !important;
+    height: 48px !important;
+  }
+}
+
+/* Stronger mobile folder layout: two compact folder tiles, no oversized preview well. */
+@media (max-width: 768px) {
+  .fm-grid:has(.fm-item.grid-item.is-folder) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    padding: 0 0 16px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder {
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    min-height: 116px !important;
+    height: 116px !important;
+    padding: 10px !important;
+    border-radius: 14px !important;
+    background: #d7effc !important;
+    gap: 8px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .mobile-media-card-header {
+    grid-template-columns: 24px minmax(0, 1fr) 24px !important;
+    gap: 5px !important;
+    min-height: 26px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .mobile-media-card-icon {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .mobile-media-card-name {
+    font-size: 0.78rem !important;
+    line-height: 1.1 !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .mobile-media-card-menu {
+    width: 24px !important;
+    height: 24px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .fm-icon-container {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, 0.68) !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-folder .fm-icon-container svg {
+    width: 42px !important;
+    height: 42px !important;
+  }
+}
+
+/* Mobile file manager: consistent compact tiles for every non-image item. */
+@media (max-width: 768px) {
+  .fm-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    padding: 0 0 16px !important;
+    align-items: stretch !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-image {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-compact {
+    grid-column: auto !important;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    height: 126px !important;
+    min-height: 126px !important;
+    max-height: 126px !important;
+    padding: 10px !important;
+    border-radius: 14px !important;
+    background: #d7effc !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    box-sizing: border-box !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-compact .mobile-media-card-header {
+    grid-template-columns: 24px minmax(0, 1fr) 24px !important;
+    gap: 5px !important;
+    min-height: 26px !important;
+    height: 26px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-compact .mobile-media-card-icon {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-compact .mobile-media-card-name {
+    font-size: 0.78rem !important;
+    line-height: 1.1 !important;
+    font-weight: 800 !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-compact .mobile-media-card-menu {
+    width: 24px !important;
+    height: 24px !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-compact .fm-icon-container {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, 0.68) !important;
+  }
+
+  .fm-grid .fm-item.grid-item.is-compact .fm-icon-container svg {
+    width: 44px !important;
+    height: 44px !important;
+  }
+}
+
+/* Mobile file manager is tile-only; list mode remains desktop-only. */
+@media (max-width: 768px) {
+  .desktop-only-view-toggle {
+    display: none !important;
+  }
+
+  .file-manager-view .fm-list-view {
+    display: none !important;
+  }
+}
