@@ -47,6 +47,8 @@ SECRET_KEY = os.environ.get("MYCLOUD_SECRET_KEY", "mycloud_dev_secret_change_me"
 DEFAULT_FAVORITE_PATH = os.environ.get("MYCLOUD_DEFAULT_FAVORITE_PATH", STORAGE_ROOT)
 DEFAULT_FAVORITE_LABEL = os.environ.get("MYCLOUD_DEFAULT_FAVORITE_LABEL", STORAGE_LABEL)
 CORS_ORIGINS = [origin.strip() for origin in os.environ.get("MYCLOUD_CORS_ORIGINS", "*").split(",") if origin.strip()]
+BACKEND_HOST = os.environ.get("MYCLOUD_BACKEND_HOST", "0.0.0.0")
+BACKEND_PORT = int(os.environ.get("MYCLOUD_BACKEND_PORT", "8000"))
 
 
 def load_json_env(name: str, default):
@@ -1331,4 +1333,4 @@ async def reindex(user: dict = Depends(get_current_user)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host=BACKEND_HOST, port=BACKEND_PORT, reload=True)

@@ -205,13 +205,16 @@ const ItemTypeIcon = ({ item = {}, size = 20, className = '', style, color }) =>
   return <FileText size={size} color={color || '#94a3b8'} className={className} style={style} />;
 };
 
+const FALLBACK_STORAGE_ROOT = import.meta.env.VITE_MYCLOUD_STORAGE_ROOT || '/';
+const FALLBACK_STORAGE_LABEL = import.meta.env.VITE_MYCLOUD_STORAGE_LABEL || 'Storage';
+
 function App() {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accentTheme, setAccentTheme] = useState(() => localStorage.getItem('mycloud_accent_theme') || 'deep-ocean');
-  const [appConfig, setAppConfig] = useState({ storage_root: '/mnt/Drive1', storage_label: 'Drive1', login_profiles: [] });
+  const [appConfig, setAppConfig] = useState({ storage_root: FALLBACK_STORAGE_ROOT, storage_label: FALLBACK_STORAGE_LABEL, login_profiles: [] });
 
   const [stats, setStats] = useState({
     images: 0, videos: 0, music: 0, files: 0, folders: 0, total_size: 0
@@ -221,7 +224,7 @@ function App() {
   const [dashboardHealth, setDashboardHealth] = useState({ health: null, index: null });
   const [loading, setLoading] = useState(true);
   const [currentView, setCurrentView] = useState('dashboard');
-  const [currentPath, setCurrentPath] = useState('/mnt/Drive1');
+  const [currentPath, setCurrentPath] = useState(FALLBACK_STORAGE_ROOT);
   const [folderContents, setFolderContents] = useState([]);
   const [loadingFolder, setLoadingFolder] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
@@ -369,11 +372,11 @@ function App() {
         if (res.ok) {
           const data = await res.json();
           setAppConfig({
-            storage_root: data.storage_root || '/mnt/Drive1',
-            storage_label: data.storage_label || 'Drive1',
+            storage_root: data.storage_root || FALLBACK_STORAGE_ROOT,
+            storage_label: data.storage_label || FALLBACK_STORAGE_LABEL,
             login_profiles: data.login_profiles || []
           });
-          setCurrentPath((previousPath) => previousPath === '/mnt/Drive1' && data.storage_root ? data.storage_root : previousPath);
+          setCurrentPath((previousPath) => previousPath === FALLBACK_STORAGE_ROOT && data.storage_root ? data.storage_root : previousPath);
         }
       } catch (error) {
         console.error('Failed to load app config:', error);
@@ -1238,8 +1241,8 @@ ${url}`);
     { key: 'music', label: 'Music', value: stats.music, color: '#10b981' },
     { key: 'files', label: 'Files', value: stats.files, color: '#f59e0b' }
   ];
-  const storageRoot = appConfig.storage_root || '/mnt/Drive1';
-  const storageLabel = appConfig.storage_label || 'Drive1';
+  const storageRoot = appConfig.storage_root || FALLBACK_STORAGE_ROOT;
+  const storageLabel = appConfig.storage_label || FALLBACK_STORAGE_LABEL;
   const effectiveViewMode = isMobileViewport ? 'grid' : viewMode;
   const formatDisplayPath = (path) => (path || '').replace(storageRoot, storageLabel);
   const uploadSummary = uploadQueue.reduce((acc, item) => {

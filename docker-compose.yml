@@ -9,13 +9,15 @@ services:
     environment:
       MYCLOUD_STORAGE_ROOT: ${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}
       MYCLOUD_SECRET_KEY: ${MYCLOUD_SECRET_KEY:-mycloud_dev_secret_change_me}
+      MYCLOUD_BACKEND_HOST: ${MYCLOUD_BACKEND_HOST:-0.0.0.0}
+      MYCLOUD_BACKEND_PORT: ${MYCLOUD_BACKEND_PORT:-8000}
     volumes:
       - ./app/data:/app/data
       - ${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}:${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}
     expose:
-      - "8000"
+      - "${MYCLOUD_BACKEND_PORT:-8000}"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5).read()\""]
+      test: ["CMD-SHELL", "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('MYCLOUD_BACKEND_PORT', '8000') + '/api/health', timeout=5).read()\""]
       interval: 5m
       timeout: 10s
       retries: 3
@@ -28,8 +30,12 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    env_file:
+      - ./app/data/mycloud.env
+    environment:
+      MYCLOUD_NGINX_BACKEND_URL: http://backend:${MYCLOUD_BACKEND_PORT:-8000}
     ports:
-      - "3000:80"
+      - "${MYCLOUD_BIND_IP:-0.0.0.0}:${MYCLOUD_FRONTEND_PORT:-3000}:80"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/api/health >/dev/null"]
       interval: 5m

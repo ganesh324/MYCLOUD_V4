@@ -17,19 +17,19 @@ docker compose --env-file app/data/mycloud.env up --build
 Open the app at:
 
 ```text
-http://localhost:3000
+${MYCLOUD_PUBLIC_BASE_URL:-http://localhost:3000}
 ```
 
 Health check:
 
 ```text
-http://localhost:3000/api/health
+${MYCLOUD_HEALTH_URL:-http://localhost:3000/api/health}
 ```
 
 The compose stack runs:
 
 - `frontend`: Nginx serving the built React app and proxying `/api` to the backend.
-- `backend`: FastAPI on port `8000` inside the Docker network.
+- `backend`: FastAPI on `${MYCLOUD_BACKEND_PORT:-8000}` inside the Docker network.
 
 Mounted paths:
 
@@ -38,6 +38,18 @@ Mounted paths:
 - `${MYCLOUD_STORAGE_ROOT}` -> `${MYCLOUD_STORAGE_ROOT}` for your storage drive.
 
 Before using this outside your home network, set a strong `MYCLOUD_SECRET_KEY` in `app/data/mycloud.env`.
+
+Network settings can all live in `app/data/mycloud.env`:
+
+```env
+MYCLOUD_BIND_IP=192.168.1.50
+MYCLOUD_FRONTEND_PORT=3000
+MYCLOUD_PUBLIC_BASE_URL=http://192.168.1.50:3000
+MYCLOUD_HEALTH_URL=http://192.168.1.50:3000/api/health
+MYCLOUD_BACKEND_HOST=0.0.0.0
+MYCLOUD_BACKEND_PORT=8000
+MYCLOUD_CORS_ORIGINS=http://192.168.1.50:3000
+```
 
 ## 24/7 watchdog
 
