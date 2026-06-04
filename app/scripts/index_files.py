@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import hashlib
 import os
 import sqlite3
 from datetime import datetime
@@ -27,6 +28,23 @@ DB_PATH = os.environ.get("MYCLOUD_DB_PATH", os.path.join(DATA_DIR, "stats.db"))
 TRASH_DIR_NAME = ".mycloud_trash"
 TRASH_ROOT = os.path.join(MOUNT_POINT, TRASH_DIR_NAME)
 
+
+def is_trash_path(path):
+    resolved = os.path.realpath(path)
+    trash_root = os.path.realpath(TRASH_ROOT)
+    return resolved == trash_root or resolved.startswith(trash_root + os.sep)
+
+
+def compute_file_hash(path):
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except (OSError, FileNotFoundError):
+        return None
+
 def init_db():
     """Creates the files table if it doesn't exist."""
     conn = sqlite3.connect(DB_PATH)
@@ -38,9 +56,18 @@ def init_db():
             filepath TEXT UNIQUE NOT NULL,
             extension TEXT,
             size_bytes INTEGER,
-            modified_time TEXT
+            modified_time TEXT,
+            content_hash TEXT
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE files ADD COLUMN content_hash TEXT")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column" not in str(exc).lower():
+            raise
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_content_hash ON files(content_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_files_filepath ON files(filepath)")
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS file_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,8 +91,7 @@ def index_drive():
     
     # Walk through the directory tree
     for root, dirs, files in os.walk(MOUNT_POINT):
-        resolved_root = os.path.realpath(root)
-        if resolved_root == TRASH_ROOT or resolved_root.startswith(TRASH_ROOT + os.sep):
+        if is_trash_path(root):
             dirs[:] = []
             continue
 
@@ -88,7 +114,7 @@ def index_drive():
             try:
                 stat_info = os.stat(dir_path)
                 mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-                file_records.append((d, dir_path, "directory", 0, mod_time))
+                file_records.append((d, dir_path, "directory", 0, mod_time, None))
             except (OSError, FileNotFoundError):
                 continue
 
@@ -101,8 +127,9 @@ def index_drive():
                 mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
                 _, ext = os.path.splitext(file)
                 ext = ext.lower().replace(".", "") # clean extension name (e.g. 'jpg')
+                content_hash = compute_file_hash(full_path)
 
-                file_records.append((file, full_path, ext, size, mod_time))
+                file_records.append((file, full_path, ext, size, mod_time, content_hash))
             except (OSError, FileNotFoundError):
                 # Safely skip individual unreadable ghost files
                 continue
@@ -116,8 +143,8 @@ def index_drive():
     
     # Bulk insert all files efficiently
     cursor.executemany("""
-        INSERT OR IGNORE INTO files (filename, filepath, extension, size_bytes, modified_time)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT OR IGNORE INTO files (filename, filepath, extension, size_bytes, modified_time, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?)
     """, file_records)
     
     conn.commit()

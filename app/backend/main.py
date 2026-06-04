@@ -49,6 +49,12 @@ DEFAULT_FAVORITE_LABEL = os.environ.get("MYCLOUD_DEFAULT_FAVORITE_LABEL", STORAG
 CORS_ORIGINS = [origin.strip() for origin in os.environ.get("MYCLOUD_CORS_ORIGINS", "*").split(",") if origin.strip()]
 BACKEND_HOST = os.environ.get("MYCLOUD_BACKEND_HOST", "0.0.0.0")
 BACKEND_PORT = int(os.environ.get("MYCLOUD_BACKEND_PORT", "8000"))
+TRASH_DIR_NAME = ".mycloud_trash"
+MAINTENANCE_LOGS = {
+    "trash_purge": os.path.join(os.path.dirname(__file__), "..", "data", "trash_purge.log"),
+    "watchdog": os.path.join(os.path.dirname(__file__), "..", "data", "watchdog.log"),
+    "indexer": os.path.join(os.path.dirname(__file__), "..", "scripts", "indexer_cron.log"),
+}
 def load_json_env(name: str, default):
     raw = os.environ.get(name)
     if not raw:
@@ -146,6 +152,51 @@ def safe_relative_upload_path(parent: str, relative_path: str) -> str:
         raise HTTPException(status_code=400, detail="Invalid upload path")
     return resolve_storage_path(os.path.join(parent, *parts))
 
+
+def get_trash_root() -> str:
+    return os.path.join(STORAGE_ROOT, TRASH_DIR_NAME)
+
+
+def get_trash_path_prefix() -> str:
+    return get_trash_root() + os.sep
+
+
+def is_trash_path(path: str) -> bool:
+    resolved = os.path.realpath(path)
+    trash_root = os.path.realpath(get_trash_root())
+    return resolved == trash_root or resolved.startswith(trash_root + os.sep)
+
+
+def compute_file_hash(path: str) -> str | None:
+    if not os.path.isfile(path):
+        return None
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def remove_path_if_exists(path: str):
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
+    elif os.path.exists(path):
+        os.remove(path)
+
+
+def read_tail_lines(path: str, limit: int = 80) -> list[str]:
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            lines = handle.readlines()
+        return [line.rstrip("\n") for line in lines[-limit:]]
+    except OSError:
+        return []
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(os.path.join(os.path.dirname(__file__), "..", "data", "thumbnails"), exist_ok=True)
@@ -237,6 +288,25 @@ async def lifespan(app: FastAPI):
             await db.commit()
             print(f"Successfully seeded {len(SEED_USERS)} default account(s) in MyCloud database!")
         
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                filepath TEXT UNIQUE NOT NULL,
+                extension TEXT,
+                size_bytes INTEGER,
+                modified_time TEXT,
+                content_hash TEXT
+            )
+        ''')
+        try:
+            await db.execute('ALTER TABLE files ADD COLUMN content_hash TEXT')
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_files_content_hash ON files(content_hash)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_files_filepath ON files(filepath)')
+
         await db.execute('''
             INSERT OR IGNORE INTO favorites (path, type, name) 
             VALUES (?, 'Folder', ?)
@@ -551,7 +621,7 @@ async def get_duplicate_files(
     offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user)
 ):
-    trash_path_prefix = os.path.join(STORAGE_ROOT, ".mycloud_trash") + os.sep
+    trash_path_prefix = get_trash_path_prefix()
 
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
@@ -561,6 +631,8 @@ async def get_duplicate_files(
                 FROM files f
                 WHERE f.extension != 'directory'
                   AND f.size_bytes > 0
+                  AND f.content_hash IS NOT NULL
+                  AND f.content_hash != ''
                   AND f.filepath NOT LIKE ?
                   AND NOT EXISTS (
                       SELECT 1
@@ -573,7 +645,7 @@ async def get_duplicate_files(
             FROM (
                 SELECT 1
                 FROM active_files
-                GROUP BY LOWER(filename), size_bytes
+                GROUP BY content_hash
                 HAVING COUNT(*) > 1
             ) duplicate_keys
         """, (trash_path_prefix,))
@@ -586,6 +658,8 @@ async def get_duplicate_files(
                 FROM files f
                 WHERE f.extension != 'directory'
                   AND f.size_bytes > 0
+                  AND f.content_hash IS NOT NULL
+                  AND f.content_hash != ''
                   AND f.filepath NOT LIKE ?
                   AND NOT EXISTS (
                       SELECT 1
@@ -596,20 +670,21 @@ async def get_duplicate_files(
             ),
             duplicate_keys AS (
                 SELECT
-                    LOWER(filename) AS name_key,
-                    size_bytes,
+                    content_hash,
                     COUNT(*) AS duplicate_count,
-                    SUM(size_bytes) AS total_size
+                    SUM(size_bytes) AS total_size,
+                    MAX(size_bytes) AS item_size
                 FROM active_files
-                GROUP BY LOWER(filename), size_bytes
+                GROUP BY content_hash
                 HAVING COUNT(*) > 1
-                ORDER BY total_size DESC, duplicate_count DESC, name_key ASC
+                ORDER BY total_size DESC, duplicate_count DESC, content_hash ASC
                 LIMIT ? OFFSET ?
             )
             SELECT
-                dk.name_key,
+                dk.content_hash,
                 dk.duplicate_count,
                 dk.total_size,
+                dk.item_size,
                 f.filename,
                 f.filepath,
                 f.extension,
@@ -617,32 +692,31 @@ async def get_duplicate_files(
                 f.modified_time
             FROM active_files f
             INNER JOIN duplicate_keys dk
-                ON LOWER(f.filename) = dk.name_key
-               AND f.size_bytes = dk.size_bytes
-            ORDER BY dk.total_size DESC, dk.duplicate_count DESC, dk.name_key ASC, f.filepath ASC
+                ON f.content_hash = dk.content_hash
+            ORDER BY dk.total_size DESC, dk.duplicate_count DESC, dk.content_hash ASC, f.filepath ASC
         """, (trash_path_prefix, limit, offset))
         rows = await cursor.fetchall()
 
     groups_by_key = {}
     duplicate_groups = []
     for row in rows:
-        key = (row["name_key"], row["size_bytes"] or 0)
+        key = row["content_hash"]
         if key not in groups_by_key:
             group = {
-                "id": f"{row['name_key']}::{row['size_bytes'] or 0}",
+                "id": f"hash::{key[:16]}",
+                "hash": key,
                 "name": row["filename"],
-                "size": row["size_bytes"] or 0,
+                "size": row["item_size"] or row["size_bytes"] or 0,
                 "count": row["duplicate_count"],
-                "wasted_size": (row["duplicate_count"] - 1) * (row["size_bytes"] or 0),
+                "wasted_size": (row["duplicate_count"] - 1) * (row["item_size"] or row["size_bytes"] or 0),
                 "files": [],
             }
             groups_by_key[key] = group
             duplicate_groups.append(group)
 
-        path = row["filepath"]
         groups_by_key[key]["files"].append({
             "name": row["filename"],
-            "path": path,
+            "path": row["filepath"],
             "type": get_item_type_from_extension(row["extension"]),
             "size": row["size_bytes"] or 0,
             "modified": row["modified_time"],
@@ -653,6 +727,7 @@ async def get_duplicate_files(
         "total_groups": total_groups,
         "limit": limit,
         "offset": offset,
+        "match_strategy": "sha256",
     }
 
 @app.get("/api/thumbnail")
@@ -737,7 +812,7 @@ async def delete_file(req: DeleteRequest, user: dict = Depends(get_current_user)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File or folder not found")
 
-    trash_root = os.path.join(STORAGE_ROOT, ".mycloud_trash")
+    trash_root = get_trash_root()
     os.makedirs(trash_root, exist_ok=True)
     name = os.path.basename(path)
     trash_name = f"{int(time.time())}_{secrets.token_hex(4)}_{name}"
@@ -845,7 +920,7 @@ async def upload_file(
                     os.makedirs(folder_path, exist_ok=True)
                     created_dirs.append(folder_path)
                 elif not os.path.isdir(folder_path):
-                    trash_root = os.path.join(STORAGE_ROOT, ".mycloud_trash")
+                    trash_root = get_trash_root()
                     os.makedirs(trash_root, exist_ok=True)
                     conflict_name = os.path.basename(folder_path)
                     trash_path = os.path.join(trash_root, f"{int(time.time())}_{secrets.token_hex(4)}_{conflict_name}")
@@ -869,6 +944,7 @@ async def upload_file(
         size = stat_info.st_size
         mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         ext = os.path.splitext(safe_filename)[1].lower().replace(".", "")
+        file_hash = compute_file_hash(target_filepath)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         async with aiosqlite.connect(DB_PATH) as db:
@@ -886,9 +962,9 @@ async def upload_file(
                     ''', (folder_path, user["username"], user["username"], now))
 
             await db.execute('''
-                INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (safe_filename, target_filepath, ext, size, mod_time))
+                INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time, content_hash)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (safe_filename, target_filepath, ext, size, mod_time, file_hash))
             if user.get("role") != "admin":
                 await db.execute('''
                     INSERT OR REPLACE INTO file_permissions (path, username, permission, granted_by, created_at)
@@ -945,13 +1021,14 @@ async def save_edited_image(
     stat_info = os.stat(target_path)
     size = stat_info.st_size
     mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    file_hash = compute_file_hash(target_path)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
-            INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
-            VALUES (?, ?, ?, ?, ?)
-        """, (candidate_name, target_path, output_ext, size, mod_time))
+            INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (candidate_name, target_path, output_ext, size, mod_time, file_hash))
         if user.get("role") != "admin":
             await db.execute("""
                 INSERT OR REPLACE INTO file_permissions (path, username, permission, granted_by, created_at)
@@ -1082,7 +1159,7 @@ async def bulk_favorite(req: BulkFavoriteRequest, user: dict = Depends(get_curre
 
 @app.post("/api/files/bulk-delete")
 async def bulk_delete(req: BulkDeleteRequest, user: dict = Depends(get_current_user)):
-    trash_root = os.path.join(STORAGE_ROOT, ".mycloud_trash")
+    trash_root = get_trash_root()
     os.makedirs(trash_root, exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         deleted_count = 0
@@ -1258,6 +1335,33 @@ async def list_trash(user: dict = Depends(get_current_user)):
         db.row_factory = sqlite3.Row
         rows = await (await db.execute('SELECT id, original_path, name, type, size_bytes, deleted_by, deleted_at FROM trash_items ORDER BY id DESC')).fetchall()
     return {"trash": [dict(row) for row in rows]}
+
+@app.delete("/api/trash")
+async def empty_trash(user: dict = Depends(get_current_user)):
+    require_admin(user)
+    trash_root = get_trash_root()
+    os.makedirs(trash_root, exist_ok=True)
+    removed_count = 0
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = await (await db.execute('SELECT * FROM trash_items')).fetchall()
+        for row in rows:
+            if row["trash_path"] and is_trash_path(row["trash_path"]):
+                remove_path_if_exists(row["trash_path"])
+                removed_count += 1
+        for name in os.listdir(trash_root):
+            remove_path_if_exists(os.path.join(trash_root, name))
+        await db.execute('DELETE FROM trash_items')
+        await db.commit()
+
+    await log_activity("trash_empty", trash_root, user["username"], f"{removed_count} indexed items removed")
+    return {"status": "success", "removed_count": removed_count}
+
+@app.get("/api/admin/maintenance/logs")
+async def get_maintenance_logs(user: dict = Depends(get_current_user)):
+    require_admin(user)
+    return {"logs": {name: read_tail_lines(path) for name, path in MAINTENANCE_LOGS.items()}}
 
 @app.post("/api/trash/{item_id}/restore")
 async def restore_trash(item_id: int, user: dict = Depends(get_current_user)):

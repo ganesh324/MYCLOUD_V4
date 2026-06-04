@@ -273,7 +273,7 @@ function App() {
   const [mobileActiveItem, setMobileActiveItem] = useState(null);
   const [sortBy, setSortBy] = useState('name');
   const [typeFilter, setTypeFilter] = useState('All');
-  const [toolsData, setToolsData] = useState({ trash: [], duplicates: [], duplicatesTotal: 0, users: [], activity: [], index: null });
+  const [toolsData, setToolsData] = useState({ trash: [], duplicates: [], duplicatesTotal: 0, users: [], activity: [], index: null, maintenance: { logs: {} } });
   const [operationTarget, setOperationTarget] = useState('');
 
   useEffect(() => {
@@ -1094,9 +1094,19 @@ function App() {
     ];
     if (user?.role === 'admin') {
       requests.push(fetch('/api/admin/users').then(r => r.ok ? r.json() : { users: [] }));
+      requests.push(fetch('/api/admin/maintenance/logs').then(r => r.ok ? r.json() : { logs: {} }));
     }
-    const [trash, duplicates, activity, index, users] = await Promise.all(requests);
-    setToolsData({ trash: trash.trash || [], duplicates: duplicates.duplicates || [], duplicatesTotal: duplicates.total_groups || 0, activity: activity.activity || [], index, users: users?.users || [] });
+    const [trash, duplicates, activity, index, users, maintenance] = await Promise.all(requests);
+    setToolsData({
+      trash: trash.trash || [],
+      duplicates: duplicates.duplicates || [],
+      duplicatesTotal: duplicates.total_groups || 0,
+      duplicateStrategy: duplicates.match_strategy || 'sha256',
+      activity: activity.activity || [],
+      index,
+      users: users?.users || [],
+      maintenance: maintenance || { logs: {} }
+    });
   };
 
   const openTools = async () => {
@@ -1118,6 +1128,20 @@ function App() {
     if (!res.ok) alert('Failed to permanently delete item');
     await loadTrashView();
     await loadToolsData();
+  };
+
+  const emptyTrash = async () => {
+    if (user?.role !== 'admin') return;
+    if (!window.confirm('Empty Trash permanently? This cannot be undone.')) return;
+    const res = await fetch('/api/trash', { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.detail || 'Failed to empty Trash');
+      return;
+    }
+    await loadTrashView();
+    await loadToolsData();
+    fetchStats();
   };
 
   const loadTrashView = async () => {
@@ -1877,7 +1901,10 @@ ${url}`);
           <div className="trash-view animate-fade-in">
             <div className="section-header mobile-recent-header">
               <span>TRASH</span>
-              <button className="btn-modal-secondary" onClick={loadTrashView}>Refresh</button>
+              <div className="section-header-actions">
+                {user.role === 'admin' && toolsData.trash.length > 0 && <button className="btn-modal-primary" onClick={emptyTrash}>Empty Trash</button>}
+                <button className="btn-modal-secondary" onClick={loadTrashView}>Refresh</button>
+              </div>
             </div>
             <div className="trash-list">
               {toolsData.trash.length === 0 ? (
@@ -1907,12 +1934,12 @@ ${url}`);
               <button className="btn-modal-secondary" onClick={loadDuplicatesView}>Refresh</button>
             </div>
             <div className="duplicate-summary-bar">
-              <span>Showing {toolsData.duplicates.length} of {toolsData.duplicatesTotal || toolsData.duplicates.length} duplicate groups</span>
+              <span>Showing {toolsData.duplicates.length} of {toolsData.duplicatesTotal || toolsData.duplicates.length} SHA-256 duplicate groups</span>
               <span>{formatSize(toolsData.duplicates.reduce((total, group) => total + group.wasted_size, 0))} possible cleanup in this view</span>
             </div>
             <div className="duplicate-list">
               {toolsData.duplicates.length === 0 ? (
-                <div className="empty-state">No duplicate candidates found in the SQLite index</div>
+                <div className="empty-state">No hash-matched duplicates found. Run Re-index Now after this update to hash older files.</div>
               ) : toolsData.duplicates.map(group => (
                 <section className="duplicate-group" key={group.id}>
                   <div className="duplicate-group-header">
@@ -2283,6 +2310,9 @@ ${url}`);
               <div className="preview-title-info">
                 <span className="preview-badge">{previewItem.type}</span>
                 <span className="preview-filename" title={previewItem.name}>{previewItem.name}</span>
+                {previewItem.type === 'Image' && previewImageIndex >= 0 && imagePreviewItems.length > 0 && (
+                  <span className="preview-image-counter">{previewImageIndex + 1} of {imagePreviewItems.length}</span>
+                )}
               </div>
               <div className="preview-actions">
                 {previewItem.type === 'Image' && !imageEditMode && (
@@ -2485,10 +2515,11 @@ ${url}`);
                   </div>
                 ))}
                 {toolsData.trash.length === 0 && <p>No trash items</p>}
+                {user.role === 'admin' && toolsData.trash.length > 0 && <button className="btn-modal-primary" onClick={emptyTrash}>Empty Trash</button>}
               </section>
               <section>
                 <h4>Duplicates</h4>
-                <p>{toolsData.duplicatesTotal || toolsData.duplicates.length} groups found from SQLite file info</p>
+                <p>{toolsData.duplicatesTotal || toolsData.duplicates.length} groups found by SHA-256 hash</p>
                 <button className="btn-modal-primary" onClick={() => { setActiveModal(null); openDuplicatesView(); }}>Review</button>
               </section>
               <section>
@@ -2496,6 +2527,20 @@ ${url}`);
                 <p>DB modified: {toolsData.index?.database_modified ? new Date(toolsData.index.database_modified * 1000).toLocaleString() : 'Unknown'}</p>
                 {user.role === 'admin' && <button className="btn-modal-primary" onClick={runReindex}>Re-index Now</button>}
               </section>
+              {user.role === 'admin' && (
+                <section>
+                  <h4>Maintenance</h4>
+                  <div className="tool-row"><span>Trash purge cron</span><small>5th monthly</small></div>
+                  <div className="tool-row"><span>Duplicate matching</span><small>SHA-256</small></div>
+                  <button className="btn-modal-secondary" onClick={loadToolsData}>Reload Logs</button>
+                  {Object.entries(toolsData.maintenance?.logs || {}).map(([name, lines]) => (
+                    <div className="maintenance-log" key={name}>
+                      <strong>{name}</strong>
+                      <pre>{(lines || []).slice(-5).join('\n') || 'No log entries yet'}</pre>
+                    </div>
+                  ))}
+                </section>
+              )}
               {user.role === 'admin' && (
                 <section>
                   <h4>Users</h4>
