@@ -6639,3 +6639,245 @@ body,
     display: none !important;
   }
 }
+
+
+/* UI polish pass: calmer surfaces, denser scan paths, and clearer states. */
+.section-header {
+  min-height: 34px;
+  margin-bottom: 14px;
+  color: #64748b;
+  letter-spacing: 0.08em;
+}
+
+.section-header > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-header > span::before {
+  content: "";
+  width: 4px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--primary);
+  opacity: 0.82;
+}
+
+.empty-state {
+  min-height: 132px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(148, 163, 184, 0.45);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.62);
+  font-weight: 700;
+}
+
+.recent-activity-table td.empty-state,
+.fm-list-table td.empty-state {
+  display: table-cell;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.recent-activity-table {
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.035);
+}
+
+.recent-activity-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(248, 250, 252, 0.96);
+  backdrop-filter: blur(8px);
+}
+
+.recent-activity-table tr.recent-row td {
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.recent-activity-table tr.recent-row:hover td {
+  background: #f8fbff;
+}
+
+.name-cell span,
+.trash-info strong,
+.trash-info small,
+.duplicate-group-header strong {
+  min-width: 0;
+}
+
+.recent-list-thumbnail {
+  box-shadow: 0 2px 7px rgba(15, 23, 42, 0.1);
+}
+
+.favorite-folder-card,
+.recent-grid-card,
+.duplicate-group,
+.trash-row,
+.tools-grid section {
+  border-color: rgba(203, 213, 225, 0.82);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.035);
+}
+
+.favorite-folder-card:hover,
+.recent-grid-card:hover,
+.trash-row:hover,
+.duplicate-row:hover {
+  border-color: rgba(96, 165, 250, 0.45);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.07);
+}
+
+.favorite-folder-name,
+.recent-card-name,
+.trash-info strong {
+  line-height: 1.25;
+}
+
+.preview-content {
+  width: min(1180px, 88vw);
+  height: min(820px, 88vh);
+  border-radius: 18px;
+}
+
+.preview-header {
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(14px);
+}
+
+.preview-title-info {
+  max-width: min(680px, 58vw);
+}
+
+.preview-badge {
+  border-radius: 6px;
+  letter-spacing: 0;
+}
+
+.preview-actions {
+  gap: 8px;
+}
+
+.preview-actions .btn-modal-secondary,
+.preview-actions .preview-edit-btn,
+.preview-actions .preview-fullscreen-btn {
+  min-height: 34px;
+}
+
+.preview-body {
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+}
+
+.preview-image-nav {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+}
+
+.tools-modal {
+  width: min(900px, calc(100vw - 32px)) !important;
+}
+
+.tools-grid {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  align-items: start;
+}
+
+.tools-grid section {
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.tool-row {
+  min-height: 34px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.74);
+}
+
+.tool-row:last-child {
+  border-bottom: 0;
+}
+
+.maintenance-log pre {
+  background: #0f172a;
+  color: #dbeafe;
+  border-color: rgba(15, 23, 42, 0.2);
+}
+
+.duplicate-summary-bar {
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.035);
+}
+
+.duplicate-group {
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+@media (min-width: 1024px) {
+  .dashboard-home-layout {
+    gap: 12px;
+  }
+
+  .dashboard-home-primary {
+    grid-template-rows: minmax(70px, 1fr) 28px minmax(70px, 1fr);
+    gap: 8px;
+  }
+
+  .dashboard-home-primary .section-header {
+    align-self: center;
+    margin: 0;
+  }
+
+  .dashboard-home-primary .dashboard-type-card {
+    border-radius: 8px;
+  }
+
+  .dashboard-home-primary .favorite-folder-card {
+    flex-basis: 230px;
+  }
+
+  .dashboard-home-recent .recent-list-view {
+    border-radius: 12px;
+  }
+
+  .dashboard-home-recent .recent-activity-table th,
+  .dashboard-home-recent .recent-activity-table td {
+    padding: 11px 18px;
+  }
+}
+
+@media (max-width: 768px) {
+  .preview-content {
+    width: calc(100vw - 18px);
+    height: calc(100vh - 18px);
+    border-radius: 12px;
+  }
+
+  .preview-header {
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .preview-title-info {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .section-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .tools-modal {
+    width: calc(100vw - 18px) !important;
+  }
+}
