@@ -351,8 +351,18 @@
   border-bottom: none;
 }
 
+.recent-activity-table tr.recent-row {
+  cursor: pointer;
+}
+
 .recent-activity-table tr:hover td {
   background-color: #f8fafc;
+}
+
+.recent-activity-table tr.recent-row:focus-visible td,
+.recent-grid-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 
 .empty-state {
@@ -429,6 +439,16 @@
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.recent-list-thumbnail {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f8fafc;
+  border: 1px solid var(--border-color);
 }
 
 /* File Manager View */
@@ -1155,6 +1175,47 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+}
+
+.image-preview-stage {
+  position: relative;
+}
+
+.preview-image-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 46px;
+  height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(226, 232, 240, 0.86);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #1e293b;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: background 0.16s ease, transform 0.16s ease, opacity 0.16s ease;
+}
+
+.preview-image-nav.previous {
+  left: 14px;
+}
+
+.preview-image-nav.next {
+  right: 14px;
+}
+
+.preview-image-nav:hover:not(:disabled) {
+  background: #ffffff;
+  transform: translateY(-50%) scale(1.04);
+}
+
+.preview-image-nav:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
 }
 
 .preview-image {
@@ -3661,6 +3722,13 @@
     gap: 10px !important;
   }
 
+  .recent-activity-table .recent-list-thumbnail {
+    width: 40px !important;
+    height: 40px !important;
+    flex-basis: 40px !important;
+    border-radius: 10px !important;
+  }
+
   .recent-activity-table .name-cell span {
     display: block !important;
     min-width: 0 !important;
@@ -5127,6 +5195,117 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+
+
+@media (min-width: 1024px) {
+  .dashboard-home-layout {
+    display: grid;
+    grid-template-rows: minmax(0, 3fr) minmax(0, 1fr) minmax(0, 6fr);
+    gap: 0;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .dashboard-home-primary,
+  .dashboard-home-recent {
+    min-height: 0;
+    min-width: 0;
+  }
+
+  .dashboard-home-primary {
+    grid-row: 1;
+    display: grid;
+    grid-template-rows: minmax(76px, 1fr) auto minmax(76px, 1fr);
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  .dashboard-home-primary .dashboard-card-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 0;
+    min-height: 0;
+    align-items: stretch;
+  }
+
+  .dashboard-home-primary .dashboard-type-card {
+    min-height: 0;
+    height: 100%;
+  }
+
+  .dashboard-home-primary .section-header {
+    margin-bottom: 0;
+  }
+
+  .dashboard-home-primary .favorites-grid {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 10px;
+    margin-bottom: 0;
+    padding-bottom: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    min-height: 0;
+  }
+
+  .dashboard-home-primary .favorite-folder-card {
+    flex: 0 0 210px;
+    min-width: 210px;
+    min-height: 0;
+    height: 100%;
+    padding: 10px 12px;
+  }
+
+  .dashboard-home-primary .favorite-folder-icon {
+    width: 30px;
+    height: 30px;
+    padding: 7px;
+  }
+
+  .dashboard-home-recent {
+    grid-row: 3;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .dashboard-home-recent .section-header {
+    margin-bottom: 12px;
+    flex: 0 0 auto;
+  }
+
+  .dashboard-home-recent .recent-activity-container,
+  .dashboard-home-recent .recent-list-view {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .dashboard-home-recent .recent-list-view {
+    overflow: auto;
+    border-radius: 16px;
+  }
+
+  .dashboard-home-recent .recent-activity-table {
+    table-layout: fixed;
+  }
+
+  .dashboard-home-recent .recent-activity-table th,
+  .dashboard-home-recent .recent-activity-table td {
+    padding: 13px 20px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .dashboard-home-layout,
+  .dashboard-home-primary,
+  .dashboard-home-recent {
+    display: block;
+    overflow: visible;
+  }
 }
 
 /* Accent Theme Background Application */

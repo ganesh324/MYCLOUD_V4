@@ -239,6 +239,7 @@ function App() {
   
   // Preview States
   const [previewItem, setPreviewItem] = useState(null);
+  const [imagePreviewItems, setImagePreviewItems] = useState([]);
   const [previewTextContent, setPreviewTextContent] = useState('');
   const [loadingPreviewText, setLoadingPreviewText] = useState(false);
   const [imageEditMode, setImageEditMode] = useState(false);
@@ -559,6 +560,7 @@ function App() {
       document.exitFullscreen().catch(() => {});
     }
     setPreviewItem(null);
+    setImagePreviewItems([]);
     resetImageEditor();
   };
 
@@ -643,6 +645,25 @@ function App() {
   const openPreview = async (item) => {
     resetImageEditor();
     setPreviewItem(item);
+
+    if (item.type === 'Image') {
+      const parentPath = getParentPath(item.path);
+      try {
+        const res = await fetch(`/api/files/list?path=${encodeURIComponent(parentPath)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setImagePreviewItems((data.items || []).filter(candidate => candidate.type === 'Image'));
+        } else {
+          setImagePreviewItems([item]);
+        }
+      } catch (error) {
+        console.error("Error loading sibling images:", error);
+        setImagePreviewItems([item]);
+      }
+    } else {
+      setImagePreviewItems([]);
+    }
+
     if (item.type === 'Text') {
       setLoadingPreviewText(true);
       setPreviewTextContent('');
@@ -1182,6 +1203,36 @@ ${url}`);
     return '/' + parts.slice(0, -1).join('/');
   };
 
+  const previewImageIndex = previewItem?.type === 'Image'
+    ? imagePreviewItems.findIndex(item => item.path === previewItem.path)
+    : -1;
+  const hasPreviousPreviewImage = previewImageIndex > 0;
+  const hasNextPreviewImage = previewImageIndex >= 0 && previewImageIndex < imagePreviewItems.length - 1;
+
+  const openAdjacentPreviewImage = (direction) => {
+    const targetIndex = previewImageIndex + direction;
+    if (targetIndex < 0 || targetIndex >= imagePreviewItems.length) return;
+    openPreview(imagePreviewItems[targetIndex]);
+  };
+
+  useEffect(() => {
+    if (previewItem?.type !== 'Image' || imageEditMode) return undefined;
+
+    const handlePreviewKeyDown = (event) => {
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        openAdjacentPreviewImage(-1);
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        openAdjacentPreviewImage(1);
+      }
+    };
+
+    window.addEventListener('keydown', handlePreviewKeyDown);
+    return () => window.removeEventListener('keydown', handlePreviewKeyDown);
+  }, [previewItem, imageEditMode, imagePreviewItems]);
+
   const formatSize = (bytes) => {
     if (!bytes) return '0 B';
     const k = 1024;
@@ -1677,8 +1728,9 @@ ${url}`);
             )}
           </div>
         ) : currentView === 'dashboard' ? (
-          <>
-            <div className="dashboard-card-grid animate-fade-in">
+          <div className="dashboard-home-layout animate-fade-in">
+            <section className="dashboard-home-primary">
+              <div className="dashboard-card-grid">
               {categoryCards.map(({ label, count, icon: Icon, color, action }) => (
                 <button key={label} className="dashboard-type-card" onClick={action} style={{ '--type-accent': color }}>
                   <span className="type-card-accent"></span>
@@ -1689,7 +1741,7 @@ ${url}`);
                   </span>
                 </button>
               ))}
-            </div>
+              </div>
 
         <div className="section-header mobile-favorites-header dashboard-section-tight">
           <span>FAVORITE FOLDERS</span>
@@ -1715,7 +1767,9 @@ ${url}`);
             No favorite folders yet.
           </div>
         )}
+            </section>
 
+            <section className="dashboard-home-recent">
         <div className="section-header mobile-recent-header">
           <span>RECENT ACTIVITY</span>
         </div>
@@ -1738,10 +1792,27 @@ ${url}`);
                 ) : recent.length > 0 ? (
                   recent.map((item, index) => {
                     return (
-                      <tr key={index} className="recent-row">
+                      <tr
+                        key={index}
+                        className="recent-row"
+                        onClick={() => openPreview(item)}
+                        onDoubleClick={() => openPreview(item)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openPreview(item);
+                          }
+                        }}
+                        tabIndex={0}
+                        title={`Open ${item.name}`}
+                      >
                         <td>
                           <div className="name-cell" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <ItemTypeIcon item={item} size={18} style={{ flexShrink: 0 }} />
+                            {item.type === 'Image' ? (
+                              <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="recent-list-thumbnail" loading="lazy" />
+                            ) : (
+                              <ItemTypeIcon item={item} size={18} style={{ flexShrink: 0 }} />
+                            )}
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
                           </div>
                         </td>
@@ -1765,7 +1836,21 @@ ${url}`);
             ) : recent.length > 0 ? (
               <div className="recent-grid">
                 {recent.map((item, index) => (
-                  <div key={index} className="recent-grid-card">
+                  <div
+                    key={index}
+                    className="recent-grid-card"
+                    onClick={() => openPreview(item)}
+                    onDoubleClick={() => openPreview(item)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openPreview(item);
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    title={`Open ${item.name}`}
+                  >
                     <div className={`recent-card-icon-wrapper ${item.type === 'Image' ? 'has-thumbnail' : ''}`}>
                       {item.type === 'Image' ? (
                         <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="recent-card-thumbnail" loading="lazy" />
@@ -1786,7 +1871,8 @@ ${url}`);
             )}
           </div>
         </div>
-          </>
+            </section>
+          </div>
         ) : currentView === 'trash' ? (
           <div className="trash-view animate-fade-in">
             <div className="section-header mobile-recent-header">
@@ -2252,8 +2338,26 @@ ${url}`);
                     </div>
                   </div>
                 ) : (
-                  <div className="preview-media-container">
+                  <div className="preview-media-container image-preview-stage">
+                    <button
+                      type="button"
+                      className="preview-image-nav previous"
+                      onClick={() => openAdjacentPreviewImage(-1)}
+                      disabled={!hasPreviousPreviewImage}
+                      title="Previous image"
+                    >
+                      <ChevronLeft size={30} />
+                    </button>
                     <img src={authUrl('/api/files/raw', previewItem.path)} alt={previewItem.name} className="preview-image" />
+                    <button
+                      type="button"
+                      className="preview-image-nav next"
+                      onClick={() => openAdjacentPreviewImage(1)}
+                      disabled={!hasNextPreviewImage}
+                      title="Next image"
+                    >
+                      <ChevronRight size={30} />
+                    </button>
                   </div>
                 )
               ) : previewItem.type === 'PDF' ? (

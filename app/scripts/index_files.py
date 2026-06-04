@@ -24,6 +24,8 @@ load_env_file(ENV_PATH)
 
 MOUNT_POINT = os.path.realpath(os.environ.get("MYCLOUD_STORAGE_ROOT", "/mnt/Drive1"))
 DB_PATH = os.environ.get("MYCLOUD_DB_PATH", os.path.join(DATA_DIR, "stats.db"))
+TRASH_DIR_NAME = ".mycloud_trash"
+TRASH_ROOT = os.path.join(MOUNT_POINT, TRASH_DIR_NAME)
 
 def init_db():
     """Creates the files table if it doesn't exist."""
@@ -62,6 +64,13 @@ def index_drive():
     
     # Walk through the directory tree
     for root, dirs, files in os.walk(MOUNT_POINT):
+        resolved_root = os.path.realpath(root)
+        if resolved_root == TRASH_ROOT or resolved_root.startswith(TRASH_ROOT + os.sep):
+            dirs[:] = []
+            continue
+
+        dirs[:] = [d for d in dirs if d != TRASH_DIR_NAME]
+
         # Gracefully handle the corrupted folders by checking readability
         # If a directory is corrupted, removing it from 'dirs' prevents os.walk from entering it
         readable_dirs = []

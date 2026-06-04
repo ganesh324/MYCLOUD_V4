@@ -49,8 +49,6 @@ DEFAULT_FAVORITE_LABEL = os.environ.get("MYCLOUD_DEFAULT_FAVORITE_LABEL", STORAG
 CORS_ORIGINS = [origin.strip() for origin in os.environ.get("MYCLOUD_CORS_ORIGINS", "*").split(",") if origin.strip()]
 BACKEND_HOST = os.environ.get("MYCLOUD_BACKEND_HOST", "0.0.0.0")
 BACKEND_PORT = int(os.environ.get("MYCLOUD_BACKEND_PORT", "8000"))
-
-
 def load_json_env(name: str, default):
     raw = os.environ.get(name)
     if not raw:
@@ -220,7 +218,7 @@ async def lifespan(app: FastAPI):
         ''')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_file_permissions_username ON file_permissions(username)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_file_permissions_path ON file_permissions(path)')
-        
+
         cursor = await db.execute("SELECT COUNT(*) FROM users")
         row = await cursor.fetchone()
         if row and row[0] == 0:
@@ -481,21 +479,10 @@ async def get_recent_activity(user: dict = Depends(get_current_user)):
         
         recent = []
         for row in rows:
-            ext = row["extension"]
-            ext = ext.lower() if ext else ""
-            if ext in IMAGE_EXTENSIONS:
-                type_ = "Image"
-            elif ext in VIDEO_EXTENSIONS:
-                type_ = "Video"
-            elif ext in MUSIC_EXTENSIONS:
-                type_ = "Music"
-            else:
-                type_ = "File"
-                
             recent.append({
                 "name": row["filename"],
                 "path": row["filepath"],
-                "type": type_,
+                "type": get_item_type_from_extension(row["extension"]),
                 "size": row["size_bytes"],
                 "modified": row["modified_time"],
                 "is_favorite": bool(row["is_favorite"])
@@ -564,32 +551,56 @@ async def get_duplicate_files(
     offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user)
 ):
+    trash_path_prefix = os.path.join(STORAGE_ROOT, ".mycloud_trash") + os.sep
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
         total_cursor = await db.execute("""
+            WITH active_files AS (
+                SELECT f.*
+                FROM files f
+                WHERE f.extension != 'directory'
+                  AND f.size_bytes > 0
+                  AND f.filepath NOT LIKE ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM trash_items t
+                      WHERE t.original_path = f.filepath
+                         OR t.trash_path = f.filepath
+                  )
+            )
             SELECT COUNT(*) AS total_groups
             FROM (
                 SELECT 1
-                FROM files
-                WHERE extension != 'directory'
-                  AND size_bytes > 0
+                FROM active_files
                 GROUP BY LOWER(filename), size_bytes
                 HAVING COUNT(*) > 1
             ) duplicate_keys
-        """)
+        """, (trash_path_prefix,))
         total_row = await total_cursor.fetchone()
         total_groups = total_row["total_groups"] if total_row else 0
 
         cursor = await db.execute("""
-            WITH duplicate_keys AS (
+            WITH active_files AS (
+                SELECT f.*
+                FROM files f
+                WHERE f.extension != 'directory'
+                  AND f.size_bytes > 0
+                  AND f.filepath NOT LIKE ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM trash_items t
+                      WHERE t.original_path = f.filepath
+                         OR t.trash_path = f.filepath
+                  )
+            ),
+            duplicate_keys AS (
                 SELECT
                     LOWER(filename) AS name_key,
                     size_bytes,
                     COUNT(*) AS duplicate_count,
                     SUM(size_bytes) AS total_size
-                FROM files
-                WHERE extension != 'directory'
-                  AND size_bytes > 0
+                FROM active_files
                 GROUP BY LOWER(filename), size_bytes
                 HAVING COUNT(*) > 1
                 ORDER BY total_size DESC, duplicate_count DESC, name_key ASC
@@ -604,13 +615,12 @@ async def get_duplicate_files(
                 f.extension,
                 f.size_bytes,
                 f.modified_time
-            FROM files f
+            FROM active_files f
             INNER JOIN duplicate_keys dk
                 ON LOWER(f.filename) = dk.name_key
                AND f.size_bytes = dk.size_bytes
-            WHERE f.extension != 'directory'
             ORDER BY dk.total_size DESC, dk.duplicate_count DESC, dk.name_key ASC, f.filepath ASC
-        """, (limit, offset))
+        """, (trash_path_prefix, limit, offset))
         rows = await cursor.fetchall()
 
     groups_by_key = {}
