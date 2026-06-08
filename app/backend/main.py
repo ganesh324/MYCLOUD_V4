@@ -1,16 +1,17 @@
 import os
 import sqlite3
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import aiosqlite
 import hashlib
 from fastapi.responses import FileResponse, StreamingResponse
-from PIL import Image
+from PIL import Image, ImageOps
 import shutil
 from datetime import datetime
 import io
+import ipaddress
 import zipfile
 import hmac
 import base64
@@ -55,6 +56,14 @@ MAINTENANCE_LOGS = {
     "watchdog": os.path.join(os.path.dirname(__file__), "..", "data", "watchdog.log"),
     "indexer": os.path.join(os.path.dirname(__file__), "..", "scripts", "indexer_cron.log"),
 }
+DEFAULT_TAGS = [
+    {"name": "Work", "color": "#2563eb"},
+    {"name": "Entertainment", "color": "#db2777"},
+    {"name": "Family", "color": "#16a34a"},
+    {"name": "Personal", "color": "#f59e0b"},
+    {"name": "Personal Work", "color": "#7c3aed"},
+]
+
 def load_json_env(name: str, default):
     raw = os.environ.get(name)
     if not raw:
@@ -217,9 +226,37 @@ async def lifespan(app: FastAPI):
                 password_hash TEXT NOT NULL,
                 salt TEXT NOT NULL,
                 role TEXT NOT NULL,
-                display_name TEXT NOT NULL
+                display_name TEXT NOT NULL,
+                first_login_code_hash TEXT,
+                first_login_code_salt TEXT,
+                first_login_completed_at TEXT
             )
         ''')
+        for column, definition in [
+            ("first_login_code_hash", "TEXT"),
+            ("first_login_code_salt", "TEXT"),
+            ("first_login_completed_at", "TEXT"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
+
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS user_devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                device_label TEXT,
+                user_agent TEXT,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                last_ip TEXT,
+                login_count INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(username, device_id)
+            )
+        ''')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_user_devices_username ON user_devices(username)')
 
         await db.execute('''
             CREATE TABLE IF NOT EXISTS trash_items (
@@ -269,6 +306,25 @@ async def lifespan(app: FastAPI):
         ''')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_file_permissions_username ON file_permissions(username)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_file_permissions_path ON file_permissions(path)')
+
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS tags (
+                name TEXT PRIMARY KEY,
+                color TEXT NOT NULL
+            )
+        ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS file_tags (
+                path TEXT NOT NULL,
+                tag_name TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (path, tag_name),
+                FOREIGN KEY (tag_name) REFERENCES tags(name) ON DELETE CASCADE
+            )
+        ''')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_file_tags_path ON file_tags(path)')
+        for tag in DEFAULT_TAGS:
+            await db.execute('INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)', (tag["name"], tag["color"]))
 
         cursor = await db.execute("SELECT COUNT(*) FROM users")
         row = await cursor.fetchone()
@@ -341,11 +397,11 @@ async def health():
     }
 
 @app.get("/api/config/public")
-async def public_config():
+async def public_config(request: Request):
     return {
         "storage_root": STORAGE_ROOT,
         "storage_label": STORAGE_LABEL,
-        "login_profiles": LOGIN_PROFILES,
+        "admin_lan_available": is_lan_client(request),
     }
 
 IMAGE_EXTENSIONS = {"bmp", "gif", "jpeg", "jpg", "png", "tga", "tif", "webp", "psd", "ico", "svg", "icns"}
@@ -377,12 +433,17 @@ class BulkDeleteRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+    secret_code: str | None = None
+    device_id: str | None = None
+    device_label: str | None = None
+    device_user_agent: str | None = None
 
 class UserCreateRequest(BaseModel):
     username: str
     password: str
     role: str = "user"
     display_name: str
+    first_login_secret_code: str | None = None
 
 class PasswordChangeRequest(BaseModel):
     username: str
@@ -397,9 +458,66 @@ class ShareCreateRequest(BaseModel):
     path: str
     expires_hours: int | None = 24
 
-def require_admin(user: dict):
+class TagUpsertRequest(BaseModel):
+    name: str
+    color: str = "#64748b"
+
+class FileTagsSetRequest(BaseModel):
+    path: str
+    tags: list[str]
+    apply_to_contents: bool = False
+
+def get_request_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return request.client.host if request.client else ""
+
+
+def is_lan_client(request: Request) -> bool:
+    client_ip = get_request_client_ip(request)
+    try:
+        ip = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
+def require_admin(user: dict, request: Request):
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
+    if not is_lan_client(request):
+        raise HTTPException(status_code=403, detail="Admin access is available only on the local network")
+
+
+def normalize_optional_text(value: str | None, max_length: int = 120) -> str | None:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None
+    return cleaned[:max_length]
+
+
+async def register_user_device(req: LoginRequest, request: Request, username: str):
+    device_id = normalize_optional_text(req.device_id, 128)
+    if not device_id:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    label = normalize_optional_text(req.device_label, 120) or "Browser device"
+    user_agent = normalize_optional_text(req.device_user_agent or request.headers.get("user-agent"), 500)
+    client_ip = request.client.host if request.client else None
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('''
+            INSERT INTO user_devices (username, device_id, device_label, user_agent, first_seen, last_seen, last_ip, login_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(username, device_id) DO UPDATE SET
+                device_label = excluded.device_label,
+                user_agent = excluded.user_agent,
+                last_seen = excluded.last_seen,
+                last_ip = excluded.last_ip,
+                login_count = user_devices.login_count + 1
+        ''', (username, device_id, label, user_agent, now, now, client_ip))
+        await db.commit()
+
 
 def get_item_type_from_extension(extension: str | None) -> str:
     ext = (extension or "").lower().replace(".", "")
@@ -424,6 +542,49 @@ def get_item_type(path: str) -> str:
     return get_item_type_from_extension(os.path.splitext(path)[1])
 
 
+def normalize_tag_name(name: str) -> str:
+    normalized = " ".join((name or "").strip().split())
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Tag name is required")
+    if len(normalized) > 40:
+        raise HTTPException(status_code=400, detail="Tag name is too long")
+    return normalized
+
+
+def normalize_tag_color(color: str) -> str:
+    color = (color or "#64748b").strip()
+    if len(color) == 7 and color.startswith("#") and all(ch in "0123456789abcdefABCDEF" for ch in color[1:]):
+        return color.lower()
+    raise HTTPException(status_code=400, detail="Tag color must be a hex value like #2563eb")
+
+
+async def get_tags_for_paths(db, paths: list[str]) -> dict[str, list[dict]]:
+    unique_paths = list(dict.fromkeys(path for path in paths if path))
+    if not unique_paths:
+        return {}
+    placeholders = ",".join(["?"] * len(unique_paths))
+    cursor = await db.execute(f"""
+        SELECT ft.path, t.name, t.color
+        FROM file_tags ft
+        JOIN tags t ON t.name = ft.tag_name
+        WHERE ft.path IN ({placeholders})
+        ORDER BY ft.path, ft.position, lower(t.name)
+    """, tuple(unique_paths))
+    rows = await cursor.fetchall()
+    tags_by_path = {path: [] for path in unique_paths}
+    for row in rows:
+        tags_by_path[row["path"]].append({"name": row["name"], "color": row["color"]})
+    return tags_by_path
+
+
+async def rewrite_tag_paths(db, old_path: str, new_path: str):
+    await db.execute('UPDATE file_tags SET path = ? WHERE path = ?', (new_path, old_path))
+    await db.execute(
+        'UPDATE file_tags SET path = ? || substr(path, ?) WHERE path LIKE ?',
+        (new_path, len(old_path) + 1, old_path + '/%')
+    )
+
+
 async def log_activity(action: str, path: str | None, actor: str, details: str | None = None):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -433,10 +594,14 @@ async def log_activity(action: str, path: str | None, actor: str, details: str |
         await db.commit()
 
 @app.post("/api/auth/login")
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
+    first_login_verified = False
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
-        cursor = await db.execute("SELECT password_hash, salt, role, display_name FROM users WHERE username = ?", (req.username,))
+        cursor = await db.execute(
+            "SELECT password_hash, salt, role, display_name, first_login_code_hash, first_login_code_salt, first_login_completed_at FROM users WHERE username = ?",
+            (req.username,)
+        )
         user = await cursor.fetchone()
         
         if not user:
@@ -445,14 +610,32 @@ async def login(req: LoginRequest):
         hashed, _ = hash_password(req.password, user["salt"])
         if hashed != user["password_hash"]:
             raise HTTPException(status_code=401, detail="Invalid username or password")
+
+        first_login_pending = bool(user["first_login_code_hash"] and not user["first_login_completed_at"])
+        if first_login_pending:
+            if not req.secret_code:
+                raise HTTPException(status_code=403, detail="First login secret code is required")
+            code_hash, _ = hash_password(req.secret_code, user["first_login_code_salt"])
+            if not hmac.compare_digest(code_hash, user["first_login_code_hash"]):
+                raise HTTPException(status_code=401, detail="Invalid first login secret code")
+            await db.execute(
+                "UPDATE users SET first_login_completed_at = ? WHERE username = ?",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), req.username)
+            )
+            await db.commit()
+            first_login_verified = True
             
         token = generate_token(req.username, user["role"], user["display_name"])
-        return {
-            "token": token,
-            "username": req.username,
-            "role": user["role"],
-            "display_name": user["display_name"]
-        }
+    if first_login_verified:
+        await log_activity("first_login_verified", req.username, req.username, "Secret code accepted")
+    await register_user_device(req, request, req.username)
+    await log_activity("login", req.username, req.username, normalize_optional_text(req.device_id, 128))
+    return {
+        "token": token,
+        "username": req.username,
+        "role": user["role"],
+        "display_name": user["display_name"]
+    }
 
 @app.get("/api/auth/me")
 async def get_me(user: dict = Depends(get_current_user)):
@@ -504,13 +687,64 @@ async def get_stats(user: dict = Depends(get_current_user)):
 
     return stats
 
+@app.get("/api/tags")
+async def list_tags(user: dict = Depends(get_current_user)):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = await (await db.execute('SELECT name, color FROM tags ORDER BY lower(name)')).fetchall()
+    return {"tags": [dict(row) for row in rows]}
+
+@app.post("/api/tags")
+async def upsert_tag(req: TagUpsertRequest, user: dict = Depends(get_current_user)):
+    name = normalize_tag_name(req.name)
+    color = normalize_tag_color(req.color)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('INSERT INTO tags (name, color) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET color = excluded.color', (name, color))
+        await db.commit()
+    await log_activity("tag_upsert", name, user["username"], color)
+    return {"tag": {"name": name, "color": color}}
+
+@app.put("/api/files/tags")
+async def set_file_tags(req: FileTagsSetRequest, user: dict = Depends(get_current_user)):
+    path = resolve_storage_path(req.path)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File or folder not found")
+    names = []
+    seen = set()
+    for raw_name in req.tags[:12]:
+        name = normalize_tag_name(raw_name)
+        if name.lower() not in seen:
+            names.append(name)
+            seen.add(name.lower())
+    target_paths = [path]
+    if req.apply_to_contents and os.path.isdir(path):
+        for root, dirs, files in os.walk(path):
+            for dirname in dirs:
+                target_paths.append(os.path.join(root, dirname))
+            for filename in files:
+                target_paths.append(os.path.join(root, filename))
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        for idx, name in enumerate(names):
+            await db.execute('INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)', (name, "#64748b"))
+        for target_path in target_paths:
+            await db.execute('DELETE FROM file_tags WHERE path = ?', (target_path,))
+            for idx, name in enumerate(names):
+                await db.execute('INSERT INTO file_tags (path, tag_name, position) VALUES (?, ?, ?)', (target_path, name, idx))
+        await db.commit()
+        tags_by_path = await get_tags_for_paths(db, target_paths)
+    await log_activity("tag_set", path, user["username"], f"{', '.join(names)}; targets={len(target_paths)}")
+    return {"path": path, "tags": tags_by_path.get(path, []), "updated_paths": target_paths, "tags_by_path": tags_by_path}
+
 @app.get("/api/favorites")
 async def get_favorites(user: dict = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
         cursor = await db.execute('SELECT path, type, name FROM favorites')
         rows = await cursor.fetchall()
-        favorites = [{"path": row["path"], "type": row["type"], "name": row["name"]} for row in rows]
+        tags_by_path = await get_tags_for_paths(db, [row["path"] for row in rows])
+        favorites = [{"path": row["path"], "type": row["type"], "name": row["name"], "tags": tags_by_path.get(row["path"], [])} for row in rows]
     return {"favorites": favorites}
 
 @app.post("/api/favorites/toggle")
@@ -546,6 +780,7 @@ async def get_recent_activity(user: dict = Depends(get_current_user)):
             LIMIT 5
         ''')
         rows = await cursor.fetchall()
+        tags_by_path = await get_tags_for_paths(db, [row["filepath"] for row in rows])
         
         recent = []
         for row in rows:
@@ -555,7 +790,8 @@ async def get_recent_activity(user: dict = Depends(get_current_user)):
                 "type": get_item_type_from_extension(row["extension"]),
                 "size": row["size_bytes"],
                 "modified": row["modified_time"],
-                "is_favorite": bool(row["is_favorite"])
+                "is_favorite": bool(row["is_favorite"]),
+                "tags": tags_by_path.get(row["filepath"], [])
             })
             
     return {"recent": recent}
@@ -569,9 +805,21 @@ async def get_files_list(path: str = STORAGE_ROOT, user: dict = Depends(get_curr
 
     # Fetch favorites to quickly determine favorite status
     async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
         cursor = await db.execute("SELECT path FROM favorites")
         rows = await cursor.fetchall()
-        favorites = {row[0] for row in rows}
+        favorites = {row["path"] for row in rows}
+        cursor = await db.execute("""
+            SELECT ft.path, t.name, t.color
+            FROM file_tags ft
+            JOIN tags t ON t.name = ft.tag_name
+            WHERE ft.path LIKE ?
+            ORDER BY ft.path, ft.position, lower(t.name)
+        """, (path.rstrip('/') + '/%',))
+        tag_rows = await cursor.fetchall()
+        tags_by_path = {}
+        for row in tag_rows:
+            tags_by_path.setdefault(row["path"], []).append({"name": row["name"], "color": row["color"]})
 
     items = []
     try:
@@ -605,7 +853,8 @@ async def get_files_list(path: str = STORAGE_ROOT, user: dict = Depends(get_curr
                         "type": item_type,
                         "size": stat.st_size,
                         "modified": stat.st_mtime * 1000,
-                        "is_favorite": entry_path in favorites
+                        "is_favorite": entry_path in favorites,
+                        "tags": tags_by_path.get(entry_path, [])
                     })
                 except OSError:
                     pass
@@ -733,30 +982,50 @@ async def get_duplicate_files(
 @app.get("/api/thumbnail")
 async def get_thumbnail(path: str, user: dict = Depends(get_current_user)):
     path = resolve_storage_path(path)
-        
+
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File not found")
-        
+
     ext = os.path.splitext(path)[1].lower().replace(".", "")
     if ext not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Not an image")
-        
-    path_hash = hashlib.md5(path.encode('utf-8')).hexdigest()
+
+    try:
+        stat = os.stat(path)
+    except OSError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # 384px covers 3x mobile square tiles while keeping cached files small.
+    thumb_profile = "sq384-q88-v2"
+    cache_key = f"{path}:{stat.st_size}:{stat.st_mtime_ns}:{thumb_profile}"
+    path_hash = hashlib.md5(cache_key.encode('utf-8')).hexdigest()
     thumbnails_dir = os.path.join(os.path.dirname(__file__), "..", "data", "thumbnails")
     thumb_path = os.path.join(thumbnails_dir, f"{path_hash}.jpg")
-    
+
     if not os.path.exists(thumb_path):
         try:
             with Image.open(path) as img:
-                if img.mode != 'RGB':
+                img.draft('RGB', (768, 768))
+                img = ImageOps.exif_transpose(img)
+                if img.mode not in {'RGB', 'L'}:
+                    img = img.convert('RGBA')
+                    background = Image.new('RGBA', img.size, (255, 255, 255, 255))
+                    background.alpha_composite(img)
+                    img = background.convert('RGB')
+                elif img.mode != 'RGB':
                     img = img.convert('RGB')
-                img.thumbnail((200, 200))
-                img.save(thumb_path, "JPEG")
+
+                thumb = ImageOps.fit(img, (384, 384), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+                thumb.save(thumb_path, "JPEG", quality=88, optimize=True, progressive=True, subsampling=1)
         except Exception as e:
             print(f"Error generating thumbnail for {path}: {e}")
             raise HTTPException(status_code=500, detail="Error generating thumbnail")
-            
-    return FileResponse(thumb_path)
+
+    return FileResponse(
+        thumb_path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=604800, immutable"},
+    )
 
 class RenameRequest(BaseModel):
     path: str
@@ -800,6 +1069,7 @@ async def rename_file(req: RenameRequest, user: dict = Depends(get_current_user)
             'UPDATE files SET filepath = ? || substr(filepath, ?) WHERE filepath LIKE ?',
             (new_path, len(old_path) + 1, old_path + '/%')
         )
+        await rewrite_tag_paths(db, old_path, new_path)
         
         await db.commit()
         
@@ -831,6 +1101,7 @@ async def delete_file(req: DeleteRequest, user: dict = Depends(get_current_user)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (path, trash_path, name, item_type, size_bytes, user["username"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         await db.execute('DELETE FROM favorites WHERE path = ? OR path LIKE ?', (path, path + '/%'))
+        await db.execute('DELETE FROM file_tags WHERE path = ? OR path LIKE ?', (path, path + '/%'))
         await db.execute('DELETE FROM files WHERE filepath = ? OR filepath LIKE ?', (path, path + '/%'))
         await db.commit()
     await log_activity("trash", path, user["username"], trash_path)
@@ -1044,6 +1315,7 @@ async def search_files(q: str = "", user: dict = Depends(get_current_user)):
     if not q:
         return []
     async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
         query_pattern = f"%{q}%"
         cursor = await db.execute('''
             SELECT filename, filepath, extension, size_bytes, modified_time 
@@ -1052,10 +1324,11 @@ async def search_files(q: str = "", user: dict = Depends(get_current_user)):
             LIMIT 50
         ''', (query_pattern,))
         rows = await cursor.fetchall()
+        tags_by_path = await get_tags_for_paths(db, [row["filepath"] for row in rows])
         
         results = []
         for row in rows:
-            name, path, ext, size, mod_time = row
+            name, path, ext, size, mod_time = row["filename"], row["filepath"], row["extension"], row["size_bytes"], row["modified_time"]
             if ext == "directory":
                 item_type = "Folder"
             elif ext in IMAGE_EXTENSIONS:
@@ -1076,12 +1349,20 @@ async def search_files(q: str = "", user: dict = Depends(get_current_user)):
                 "path": path,
                 "type": item_type,
                 "size": size,
-                "modified": mod_time
+                "modified": mod_time,
+                "tags": tags_by_path.get(path, [])
             })
         return results
 
 @app.get("/api/files/category")
-async def get_files_by_category(category: str, user: dict = Depends(get_current_user)):
+async def get_files_by_category(
+    category: str,
+    request: Request,
+    limit: int = Query(default=40, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    user: dict = Depends(get_current_user)
+):
+    legacy_array_response = "limit" not in request.query_params and "offset" not in request.query_params
     ext_filter = None
     exclude_others = False
     
@@ -1097,29 +1378,33 @@ async def get_files_by_category(category: str, user: dict = Depends(get_current_
         raise HTTPException(status_code=400, detail="Invalid category")
         
     async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
         if ext_filter:
             placeholders = ",".join(["?"] * len(ext_filter))
-            query = f'''
-                SELECT filename, filepath, extension, size_bytes, modified_time 
-                FROM files 
-                WHERE extension IN ({placeholders})
-            '''
-            cursor = await db.execute(query, tuple(ext_filter))
+            where_clause = f"extension IN ({placeholders})"
+            params = tuple(ext_filter)
         elif exclude_others:
             all_media = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | MUSIC_EXTENSIONS | PDF_EXTENSIONS | TEXT_EXTENSIONS
             placeholders = ",".join(["?"] * len(all_media))
-            query = f'''
-                SELECT filename, filepath, extension, size_bytes, modified_time 
-                FROM files 
-                WHERE extension NOT IN ({placeholders}) AND extension != 'directory'
-            '''
-            cursor = await db.execute(query, tuple(all_media))
-            
+            where_clause = f"extension NOT IN ({placeholders}) AND extension != 'directory'"
+            params = tuple(all_media)
+
+        count_cursor = await db.execute(f"SELECT COUNT(*) AS total FROM files WHERE {where_clause}", params)
+        total = (await count_cursor.fetchone())["total"]
+        query = f'''
+            SELECT filename, filepath, extension, size_bytes, modified_time
+            FROM files
+            WHERE {where_clause}
+            ORDER BY datetime(modified_time) DESC, lower(filename) ASC
+            LIMIT ? OFFSET ?
+        '''
+        cursor = await db.execute(query, params + (limit, offset))
         rows = await cursor.fetchall()
+        tags_by_path = await get_tags_for_paths(db, [row["filepath"] for row in rows])
         
         results = []
         for row in rows:
-            name, path, ext, size, mod_time = row
+            name, path, ext, size, mod_time = row["filename"], row["filepath"], row["extension"], row["size_bytes"], row["modified_time"]
             if ext in IMAGE_EXTENSIONS:
                 item_type = "Image"
             elif ext in VIDEO_EXTENSIONS:
@@ -1138,9 +1423,18 @@ async def get_files_by_category(category: str, user: dict = Depends(get_current_
                 "path": path,
                 "type": item_type,
                 "size": size,
-                "modified": mod_time
+                "modified": mod_time,
+                "tags": tags_by_path.get(path, [])
             })
-        return results
+        if legacy_array_response:
+            return results
+        return {
+            "items": results,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(results) < total
+        }
 
 @app.post("/api/files/bulk-favorite")
 async def bulk_favorite(req: BulkFavoriteRequest, user: dict = Depends(get_current_user)):
@@ -1182,6 +1476,7 @@ async def bulk_delete(req: BulkDeleteRequest, user: dict = Depends(get_current_u
                     ''', (path, trash_path, name, item_type, size_bytes, user["username"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                     await db.execute('DELETE FROM files WHERE filepath = ? OR filepath LIKE ?', (path, path + '/%'))
                     await db.execute('DELETE FROM favorites WHERE path = ? OR path LIKE ?', (path, path + '/%'))
+                    await db.execute('DELETE FROM file_tags WHERE path = ? OR path LIKE ?', (path, path + '/%'))
                     deleted_count += 1
                 except Exception as e:
                     print(f"Error moving {path} to trash: {e}")
@@ -1219,31 +1514,63 @@ async def bulk_download(req: BulkDeleteRequest, user: dict = Depends(get_current
 
 
 @app.get("/api/admin/users")
-async def list_users(user: dict = Depends(get_current_user)):
-    require_admin(user)
+async def list_users(request: Request, user: dict = Depends(get_current_user)):
+    require_admin(user, request)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
-        rows = await (await db.execute('SELECT username, role, display_name FROM users ORDER BY username')).fetchall()
-    return {"users": [dict(row) for row in rows]}
+        user_rows = await (await db.execute('''
+            SELECT u.username, u.role, u.display_name, u.first_login_completed_at,
+                   CASE WHEN u.first_login_code_hash IS NOT NULL AND u.first_login_completed_at IS NULL THEN 1 ELSE 0 END AS first_login_pending,
+                   COUNT(a.id) AS activity_count,
+                   MAX(a.created_at) AS last_activity_at
+            FROM users u
+            LEFT JOIN activity_log a ON a.actor = u.username
+            GROUP BY u.username, u.role, u.display_name, u.first_login_completed_at, u.first_login_code_hash
+            ORDER BY lower(u.username)
+        ''')).fetchall()
+        device_rows = await (await db.execute('''
+            SELECT username, device_id, device_label, user_agent, first_seen, last_seen, last_ip, login_count
+            FROM user_devices
+            ORDER BY last_seen DESC
+        ''')).fetchall()
+    devices_by_user = {}
+    for row in device_rows:
+        device = dict(row)
+        devices_by_user.setdefault(device.pop("username"), []).append(device)
+    users = []
+    for row in user_rows:
+        profile = dict(row)
+        profile["first_login_pending"] = bool(profile["first_login_pending"])
+        profile["devices"] = devices_by_user.get(profile["username"], [])
+        users.append(profile)
+    return {"users": users}
 
 @app.post("/api/admin/users")
-async def create_user(req: UserCreateRequest, user: dict = Depends(get_current_user)):
-    require_admin(user)
+async def create_user(req: UserCreateRequest, request: Request, user: dict = Depends(get_current_user)):
+    require_admin(user, request)
     if req.role not in {"admin", "user"}:
         raise HTTPException(status_code=400, detail="Invalid role")
     hashed, salt = hash_password(req.password)
+    first_login_code = normalize_optional_text(req.first_login_secret_code, 120)
+    code_hash = code_salt = None
+    if first_login_code:
+        code_hash, code_salt = hash_password(first_login_code)
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute('INSERT INTO users (username, password_hash, salt, role, display_name) VALUES (?, ?, ?, ?, ?)', (req.username, hashed, salt, req.role, req.display_name))
+            await db.execute('''
+                INSERT INTO users (username, password_hash, salt, role, display_name, first_login_code_hash, first_login_code_salt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (req.username, hashed, salt, req.role, req.display_name, code_hash, code_salt))
             await db.commit()
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="Username already exists")
-    await log_activity("user_create", req.username, user["username"], req.role)
+    details = f"role={req.role}; first_login_code={'set' if code_hash else 'not_set'}"
+    await log_activity("user_create", req.username, user["username"], details)
     return {"status": "success"}
 
 @app.post("/api/admin/users/password")
-async def change_user_password(req: PasswordChangeRequest, user: dict = Depends(get_current_user)):
-    require_admin(user)
+async def change_user_password(req: PasswordChangeRequest, request: Request, user: dict = Depends(get_current_user)):
+    require_admin(user, request)
     hashed, salt = hash_password(req.new_password)
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('UPDATE users SET password_hash = ?, salt = ? WHERE username = ?', (hashed, salt, req.username))
@@ -1254,15 +1581,18 @@ async def change_user_password(req: PasswordChangeRequest, user: dict = Depends(
     return {"status": "success"}
 
 @app.delete("/api/admin/users/{username}")
-async def delete_user(username: str, user: dict = Depends(get_current_user)):
-    require_admin(user)
+async def delete_user(username: str, request: Request, user: dict = Depends(get_current_user)):
+    require_admin(user, request)
     if username == user["username"]:
         raise HTTPException(status_code=400, detail="You cannot delete your own account")
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('DELETE FROM users WHERE username = ?', (username,))
+        if cursor.rowcount == 0:
+            await db.commit()
+            raise HTTPException(status_code=404, detail="User not found")
+        await db.execute('DELETE FROM user_devices WHERE username = ?', (username,))
+        await db.execute('DELETE FROM file_permissions WHERE username = ? OR granted_by = ?', (username, username))
         await db.commit()
-    if cursor.rowcount == 0:
-        raise HTTPException(status_code=404, detail="User not found")
     await log_activity("user_delete", username, user["username"])
     return {"status": "success"}
 
@@ -1303,6 +1633,12 @@ async def copy_item(req: FileOperationRequest, user: dict = Depends(get_current_
         shutil.copytree(source, target)
     else:
         shutil.copy2(source, target)
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = await (await db.execute('SELECT tag_name, position FROM file_tags WHERE path = ? ORDER BY position', (source,))).fetchall()
+        for row in rows:
+            await db.execute('INSERT OR REPLACE INTO file_tags (path, tag_name, position) VALUES (?, ?, ?)', (target, row["tag_name"], row["position"]))
+        await db.commit()
     await log_activity("copy", source, user["username"], target)
     return {"status": "success", "path": target}
 
@@ -1325,6 +1661,13 @@ async def move_item(req: FileOperationRequest, user: dict = Depends(get_current_
     if os.path.exists(target):
         raise HTTPException(status_code=400, detail="Target already exists")
     shutil.move(source, target)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE favorites SET path = ?, name = ? WHERE path = ?', (target, os.path.basename(target), source))
+        await db.execute('UPDATE favorites SET path = ? || substr(path, ?) WHERE path LIKE ?', (target, len(source) + 1, source + '/%'))
+        await db.execute('UPDATE files SET filepath = ?, filename = ? WHERE filepath = ?', (target, os.path.basename(target), source))
+        await db.execute('UPDATE files SET filepath = ? || substr(filepath, ?) WHERE filepath LIKE ?', (target, len(source) + 1, source + '/%'))
+        await rewrite_tag_paths(db, source, target)
+        await db.commit()
     await log_activity("move", source, user["username"], target)
     return {"status": "success", "path": target}
 
@@ -1337,8 +1680,8 @@ async def list_trash(user: dict = Depends(get_current_user)):
     return {"trash": [dict(row) for row in rows]}
 
 @app.delete("/api/trash")
-async def empty_trash(user: dict = Depends(get_current_user)):
-    require_admin(user)
+async def empty_trash(request: Request, user: dict = Depends(get_current_user)):
+    require_admin(user, request)
     trash_root = get_trash_root()
     os.makedirs(trash_root, exist_ok=True)
     removed_count = 0
@@ -1359,8 +1702,8 @@ async def empty_trash(user: dict = Depends(get_current_user)):
     return {"status": "success", "removed_count": removed_count}
 
 @app.get("/api/admin/maintenance/logs")
-async def get_maintenance_logs(user: dict = Depends(get_current_user)):
-    require_admin(user)
+async def get_maintenance_logs(request: Request, user: dict = Depends(get_current_user)):
+    require_admin(user, request)
     return {"logs": {name: read_tail_lines(path) for name, path in MAINTENANCE_LOGS.items()}}
 
 @app.post("/api/trash/{item_id}/restore")
@@ -1425,6 +1768,19 @@ async def activity(user: dict = Depends(get_current_user)):
         rows = await (await db.execute('SELECT action, path, actor, created_at, details FROM activity_log ORDER BY id DESC LIMIT 100')).fetchall()
     return {"activity": [dict(row) for row in rows]}
 
+@app.get("/api/admin/activity")
+async def admin_activity(request: Request, limit: int = Query(default=300, ge=1, le=1000), user: dict = Depends(get_current_user)):
+    require_admin(user, request)
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = await (await db.execute('''
+            SELECT action, path, actor, created_at, details
+            FROM activity_log
+            ORDER BY id DESC
+            LIMIT ?
+        ''', (limit,))).fetchall()
+    return {"activity": [dict(row) for row in rows]}
+
 @app.get("/api/index/status")
 async def index_status(user: dict = Depends(get_current_user)):
     script = os.path.join(os.path.dirname(__file__), "..", "scripts", "index_files.py")
@@ -1433,8 +1789,8 @@ async def index_status(user: dict = Depends(get_current_user)):
     return {"database_modified": db_mtime, "script_exists": os.path.exists(script), "log_exists": os.path.exists(log_path)}
 
 @app.post("/api/index/reindex")
-async def reindex(user: dict = Depends(get_current_user)):
-    require_admin(user)
+async def reindex(request: Request, user: dict = Depends(get_current_user)):
+    require_admin(user, request)
     script = os.path.join(os.path.dirname(__file__), "..", "scripts", "index_files.py")
     if not os.path.exists(script):
         raise HTTPException(status_code=404, detail="Indexer script not found")

@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Home, Folder, Star, Share2, Search, Upload, Plus, 
-  Menu, MoreVertical, Image as ImageIcon, Video, Music, FileText, ChevronRight, ChevronLeft, ArrowLeft,
-  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, Loader2, Download, AlignLeft, X, MoveRight, Copy, Clipboard, Scissors, RotateCcw, RotateCw, FlipHorizontal, ZoomIn, ZoomOut, Save, Maximize2, Minimize2
+  Menu, MoreVertical, Image as ImageIcon, Music, FileText, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft,
+  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, Loader2, Download, AlignLeft, X, MoveRight, Copy, Clipboard, Scissors, RotateCcw, RotateCw, FlipHorizontal, ZoomIn, ZoomOut, Save, Maximize2, Minimize2, Tag, Users, Activity, KeyRound, Monitor, ShieldCheck
 } from 'lucide-react';
+import ItemTypeIcon, { isFullPreviewImageItem } from './components/ItemTypeIcon';
+import { authUrl, installAuthFetchInterceptor } from './utils/api';
 import './App.css';
 import Login from './Login';
 
@@ -14,199 +16,13 @@ const ACCENT_THEMES = [
   { id: 'solarized-bronze', name: 'Solarized Bronze', colors: ['#d97706', '#78350f'] }
 ];
 
-// Setup global fetch interceptor for MyCloud session tokens
-const originalFetch = window.fetch;
-window.fetch = async (url, options = {}) => {
-  const token = localStorage.getItem("mycloud_token");
-  if (token) {
-    options.headers = {
-      ...options.headers,
-      "Authorization": `Bearer ${token}`
-    };
-  }
-  return originalFetch(url, options);
-};
-
-const authUrl = (endpoint, path) => {
-  const params = new URLSearchParams({ path });
-  const token = localStorage.getItem("mycloud_token");
-  if (token) params.set("token", token);
-  return `${endpoint}?${params.toString()}`;
-};
+installAuthFetchInterceptor();
 
 const hasMyCloudDragPayload = (dataTransfer) => Array.from(dataTransfer?.types || []).includes('application/x-mycloud-paths');
 
-const getFileExtension = (item = {}) => {
-  const source = item.name || item.path || '';
-  const dotIndex = source.lastIndexOf('.');
-  return dotIndex >= 0 ? source.slice(dotIndex + 1).toLowerCase() : '';
-};
-
-const isArchiveItem = (item = {}) => {
-  const ext = getFileExtension(item);
-  return ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'tgz'].includes(ext);
-};
-
-const isPresentationItem = (item = {}) => {
-  const ext = getFileExtension(item);
-  return ['ppt', 'pptx', 'odp', 'key'].includes(ext);
-};
-
-const isOfficeDataItem = (item = {}) => {
-  const ext = getFileExtension(item);
-  return ['xml', 'sql', 'db', 'sqlite', 'sqlite3', 'parquet', 'avro'].includes(ext);
-};
-
-const isSpreadsheetItem = (item = {}) => {
-  const ext = getFileExtension(item);
-  return ['xls', 'xlsx', 'xlsm', 'csv', 'tsv', 'ods', 'numbers'].includes(ext);
-};
-
-const isDocumentItem = (item = {}) => {
-  const ext = getFileExtension(item);
-  return item.type === 'Text' || ['doc', 'docx', 'rtf', 'odt', 'pages'].includes(ext);
-};
-
-const isFullPreviewImageItem = (item = {}) => {
-  if (item.type !== 'Image') return false;
-  const ext = getFileExtension(item);
-  return !['ico', 'icns', 'svg'].includes(ext);
-};
-
-const GlossyFolderIcon = ({ size = 24, className = '', style }) => (
-  <svg width={size} height={size} viewBox="0 0 72 64" className={className} style={style} aria-hidden="true" focusable="false">
-    <defs>
-      <linearGradient id="folderBodyGradient" x1="14" y1="10" x2="57" y2="62" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#d7f4ff" />
-        <stop offset="0.5" stopColor="#8ccdea" />
-        <stop offset="1" stopColor="#2b79bd" />
-      </linearGradient>
-      <linearGradient id="folderFrontGradient" x1="20" y1="18" x2="53" y2="61" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#dff8ff" />
-        <stop offset="0.45" stopColor="#a9def3" />
-        <stop offset="1" stopColor="#62aad8" />
-      </linearGradient>
-      <linearGradient id="folderShineGradient" x1="22" y1="20" x2="56" y2="52" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#ffffff" stopOpacity="0.72" />
-        <stop offset="1" stopColor="#ffffff" stopOpacity="0.06" />
-      </linearGradient>
-    </defs>
-    <path d="M8 19c0-5 4-9 9-9h15c3 0 5 1 7 4l4 5h12c5 0 9 4 9 9v25c0 5-4 9-9 9H17c-5 0-9-4-9-9z" fill="url(#folderBodyGradient)" stroke="#79bfe2" strokeWidth="2" />
-    <path d="M11 28c1-5 5-8 10-8h16c3 0 5 1 7 4l3 4h14c4 0 7 4 6 8l-5 18c-1 5-5 8-10 8H15c-5 0-8-4-7-9z" fill="url(#folderFrontGradient)" stroke="#7cc0df" strokeWidth="2" />
-    <path d="M15 29c2-3 5-5 9-5h13c3 0 5 1 7 4l2 2h15" fill="none" stroke="#effbff" strokeWidth="3" strokeLinecap="round" opacity="0.7" />
-    <path d="M17 31h39c3 0 5 3 4 6l-4 14c-1 3-3 5-6 5H17c-3 0-5-3-4-6z" fill="url(#folderShineGradient)" opacity="0.9" />
-  </svg>
-);
-
-const SpreadsheetFileIcon = ({ size = 24, className = '', style }) => (
-  <svg width={size} height={size} viewBox="0 0 64 64" className={className} style={style} aria-hidden="true" focusable="false">
-    <path d="M16 3h29l11 11v43a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4z" fill="#25a968" />
-    <path d="M45 3v13a4 4 0 0 0 4 4h7z" fill="#a8dec4" />
-    <path d="M56 20 45 31V20z" fill="#16894f" opacity="0.65" />
-    <rect x="23" y="32" width="25" height="19" rx="2" fill="#ffffff" />
-    <path d="M27 37h7M39 37h6M27 43h7M39 43h6M27 49h7M39 49h6" stroke="#25a968" strokeWidth="4" strokeLinecap="square" />
-  </svg>
-);
-
-const PdfFileIcon = ({ size = 24, className = '', style }) => (
-  <svg width={size} height={size} viewBox="0 0 64 64" className={className} style={style} aria-hidden="true" focusable="false">
-    <path d="M18 4h24l14 14v38a4 4 0 0 1-4 4H18a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4z" fill="#fff" stroke="#ff2727" strokeWidth="4" />
-    <path d="M42 4v13a3 3 0 0 0 3 3h11" fill="none" stroke="#ff2727" strokeWidth="4" strokeLinejoin="round" />
-    <path d="M24 19h20M24 26h20M24 33h20" stroke="#94a3b8" strokeWidth="2.4" strokeLinecap="round" />
-    <rect x="8" y="37" width="38" height="16" rx="2" fill="#ff2727" />
-    <text x="27" y="49" fill="#fff" fontSize="12" fontWeight="800" fontFamily="Inter, Arial, sans-serif" textAnchor="middle">PDF</text>
-  </svg>
-);
-
-const DocsFileIcon = ({ size = 24, className = '', style }) => (
-  <svg width={size} height={size} viewBox="0 0 64 64" className={className} style={style} aria-hidden="true" focusable="false">
-    <path d="M16 5h28l12 12v42H16z" fill="#1395f6" stroke="#111827" strokeWidth="5" strokeLinejoin="round" />
-    <path d="M44 5v13h12" fill="#dff2ff" stroke="#111827" strokeWidth="5" strokeLinejoin="round" />
-    <path d="M24 34h24M24 42h24M24 50h17" stroke="#0f172a" strokeWidth="4.5" strokeLinecap="round" />
-  </svg>
-);
-
-const ArchiveFileIcon = ({ size = 24, className = '', style }) => (
-  <svg width={size} height={size} viewBox="0 0 72 64" className={className} style={style} aria-hidden="true" focusable="false">
-    <defs>
-      <linearGradient id="archiveBodyGradient" x1="16" y1="8" x2="58" y2="59" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#d6f3ff" />
-        <stop offset="0.52" stopColor="#9dd8ef" />
-        <stop offset="1" stopColor="#5aa6d7" />
-      </linearGradient>
-      <linearGradient id="archiveShineGradient" x1="24" y1="14" x2="56" y2="48" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#ffffff" stopOpacity="0.62" />
-        <stop offset="1" stopColor="#ffffff" stopOpacity="0.08" />
-      </linearGradient>
-    </defs>
-    <path d="M8 20c0-5 4-9 9-9h38c5 0 9 4 9 9v33c0 5-4 9-9 9H17c-5 0-9-4-9-9z" fill="url(#archiveBodyGradient)" stroke="#7fc3e2" strokeWidth="2" />
-    <path d="M14 18h45v8H14z" fill="#c8edfb" opacity="0.78" />
-    <path d="M16 13v48" stroke="#4f93bd" strokeWidth="5" opacity="0.5" />
-    <path d="M20 13v48" stroke="#e5edf2" strokeWidth="3" />
-    <path d="M20 16h5M20 22h5M20 28h5M20 34h5M20 40h5M20 46h5M20 52h5" stroke="#4b5563" strokeWidth="2" strokeLinecap="round" />
-    <rect x="54" y="9" width="9" height="13" rx="3" fill="#d9dde2" stroke="#6b7280" strokeWidth="1.5" />
-    <path d="M56 15h5" stroke="#6b7280" strokeWidth="1.5" strokeLinecap="round" />
-    <path d="M29 18h26c3 0 5 2 5 5v25c0 4-3 7-7 7H29z" fill="url(#archiveShineGradient)" opacity="0.75" />
-  </svg>
-);
-
-const PresentationFileIcon = ({ size = 24, className = '', style }) => (
-  <svg width={size} height={size} viewBox="0 0 64 64" className={className} style={style} aria-hidden="true" focusable="false">
-    <defs>
-      <linearGradient id="presentationBgGradient" x1="14" y1="8" x2="55" y2="57" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#ffcf64" />
-        <stop offset="0.45" stopColor="#ff6a4c" />
-        <stop offset="1" stopColor="#e91e63" />
-      </linearGradient>
-      <linearGradient id="presentationTileGradient" x1="8" y1="32" x2="32" y2="57" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#ef334b" />
-        <stop offset="1" stopColor="#9f1028" />
-      </linearGradient>
-    </defs>
-    <path d="M35 4c14 0 25 11 25 25 0 17-13 31-31 31C15 60 4 49 4 35 4 18 18 4 35 4z" fill="url(#presentationBgGradient)" />
-    <path d="M33 12h13a10 10 0 0 1 10 10v11H42a9 9 0 0 1-9-9z" fill="#ffb45d" opacity="0.7" />
-    <rect x="6" y="31" width="29" height="27" rx="6" fill="url(#presentationTileGradient)" />
-    <text x="20.5" y="50" fill="#ffffff" fontSize="23" fontWeight="850" fontFamily="Inter, Arial, sans-serif" textAnchor="middle">P</text>
-  </svg>
-);
-
-const OfficeDataFileIcon = ({ size = 24, className = '', style }) => (
-  <svg width={size} height={size} viewBox="0 0 64 64" className={className} style={style} aria-hidden="true" focusable="false">
-    <defs>
-      <linearGradient id="dataBlueGradient" x1="16" y1="5" x2="48" y2="59" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#d8f2ff" />
-        <stop offset="0.5" stopColor="#9ed3ee" />
-        <stop offset="1" stopColor="#5d9fcc" />
-      </linearGradient>
-      <linearGradient id="dataShineGradient" x1="20" y1="6" x2="48" y2="25" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#ffffff" stopOpacity="0.82" />
-        <stop offset="1" stopColor="#ffffff" stopOpacity="0.08" />
-      </linearGradient>
-    </defs>
-    <ellipse cx="32" cy="12" rx="22" ry="8" fill="#caeaff" stroke="#8cc8e8" strokeWidth="2" />
-    <path d="M10 12v40c0 5 10 9 22 9s22-4 22-9V12c0 5-10 9-22 9s-22-4-22-9z" fill="url(#dataBlueGradient)" stroke="#8cc8e8" strokeWidth="2" />
-    <path d="M10 25c0 5 10 9 22 9s22-4 22-9M10 38c0 5 10 9 22 9s22-4 22-9M10 51c0 5 10 9 22 9s22-4 22-9" fill="none" stroke="#f8fdff" strokeWidth="3" opacity="0.9" />
-    <ellipse cx="32" cy="12" rx="17" ry="5" fill="url(#dataShineGradient)" />
-    <path d="M18 17c6 3 22 3 28 0" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" opacity="0.7" />
-  </svg>
-);
-
-const ItemTypeIcon = ({ item = {}, size = 20, className = '', style, color }) => {
-  if (item.type === 'Folder') return <GlossyFolderIcon size={size} className={className} style={style} />;
-  if (item.type === 'Image') return <ImageIcon size={size} color={color || '#3a7bd5'} className={className} style={style} />;
-  if (item.type === 'Video') return <Video size={size} color={color || '#8a2387'} className={className} style={style} />;
-  if (item.type === 'Music') return <Music size={size} color={color || '#10b981'} className={className} style={style} />;
-  if (item.type === 'PDF') return <PdfFileIcon size={size} className={className} style={style} />;
-  if (isArchiveItem(item)) return <ArchiveFileIcon size={size} className={className} style={style} />;
-  if (isPresentationItem(item)) return <PresentationFileIcon size={size} className={className} style={style} />;
-  if (isOfficeDataItem(item)) return <OfficeDataFileIcon size={size} className={className} style={style} />;
-  if (isSpreadsheetItem(item)) return <SpreadsheetFileIcon size={size} className={className} style={style} />;
-  if (isDocumentItem(item)) return <DocsFileIcon size={size} className={className} style={style} />;
-  return <FileText size={size} color={color || '#94a3b8'} className={className} style={style} />;
-};
-
 const FALLBACK_STORAGE_ROOT = import.meta.env.VITE_MYCLOUD_STORAGE_ROOT || '/';
 const FALLBACK_STORAGE_LABEL = import.meta.env.VITE_MYCLOUD_STORAGE_LABEL || 'Storage';
+const CATEGORY_PAGE_SIZE = 40;
 
 function App() {
   const [user, setUser] = useState(null);
@@ -214,7 +30,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accentTheme, setAccentTheme] = useState(() => localStorage.getItem('mycloud_accent_theme') || 'deep-ocean');
-  const [appConfig, setAppConfig] = useState({ storage_root: FALLBACK_STORAGE_ROOT, storage_label: FALLBACK_STORAGE_LABEL, login_profiles: [] });
+  const [appConfig, setAppConfig] = useState({ storage_root: FALLBACK_STORAGE_ROOT, storage_label: FALLBACK_STORAGE_LABEL, admin_lan_available: false });
 
   const [stats, setStats] = useState({
     images: 0, videos: 0, music: 0, files: 0, folders: 0, total_size: 0
@@ -267,6 +83,13 @@ function App() {
   const [activeCategory, setActiveCategory] = useState(null);
   const [categoryFiles, setCategoryFiles] = useState([]);
   const [loadingCategory, setLoadingCategory] = useState(false);
+  const [loadingMoreCategory, setLoadingMoreCategory] = useState(false);
+  const [categoryPagination, setCategoryPagination] = useState({ total: 0, hasMore: false });
+  const [categoryTimelineMode, setCategoryTimelineMode] = useState('date');
+  const [collapsedTimelineGroups, setCollapsedTimelineGroups] = useState(() => new Set());
+  const categoryLoadMoreRef = useRef(null);
+  const mainContentRef = useRef(null);
+  const [activeTimelineScrubLabel, setActiveTimelineScrubLabel] = useState('');
   
   const [selectedPaths, setSelectedPaths] = useState([]);
   const [inspectorItem, setInspectorItem] = useState(null);
@@ -274,7 +97,11 @@ function App() {
   const [sortBy, setSortBy] = useState('name');
   const [typeFilter, setTypeFilter] = useState('All');
   const [toolsData, setToolsData] = useState({ trash: [], duplicates: [], duplicatesTotal: 0, users: [], activity: [], index: null, maintenance: { logs: {} } });
+  const [newUserForm, setNewUserForm] = useState({ username: '', display_name: '', role: 'user', password: '', first_login_secret_code: '' });
   const [operationTarget, setOperationTarget] = useState('');
+  const [availableTags, setAvailableTags] = useState([]);
+  const [tagDraft, setTagDraft] = useState({ name: '', color: '#2563eb' });
+  const [applyTagsToContents, setApplyTagsToContents] = useState(false);
 
   useEffect(() => {
     currentPathRef.current = currentPath;
@@ -299,6 +126,22 @@ function App() {
     }
   }, [imageEditMode, imageTransform, previewItem]);
 
+
+  useEffect(() => {
+    if (currentView !== 'categoryGallery' || loadingCategory || loadingMoreCategory || !categoryPagination.hasMore) return;
+    const sentinel = categoryLoadMoreRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        loadMoreCategoryFiles();
+      }
+    }, { rootMargin: '700px 0px' });
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [currentView, activeCategory, categoryFiles.length, categoryPagination.hasMore, loadingCategory, loadingMoreCategory]);
+
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsPreviewFullscreen(document.fullscreenElement === previewContentRef.current);
@@ -307,17 +150,22 @@ function App() {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  const openFolder = async (path) => {
+  const openFolder = async (path, options = {}) => {
     setCurrentView('fileManager');
     setCurrentPath(path);
     setInspectorItem(null);
-    setSelectedPaths([]);
+    setSelectedPaths(options.selectedPath ? [options.selectedPath] : []);
     setLoadingFolder(true);
     try {
       const res = await fetch(`/api/files/list?path=${encodeURIComponent(path)}`);
       if (res.ok) {
         const data = await res.json();
-        setFolderContents(data.items || []);
+        const items = data.items || [];
+        setFolderContents(items);
+        if (options.selectedPath) {
+          const selected = items.find(item => item.path === options.selectedPath);
+          if (selected) setInspectorItem(selected);
+        }
       } else {
         console.error("Failed to load directory");
         setFolderContents([]);
@@ -342,23 +190,26 @@ function App() {
 
   const fetchStats = async () => {
     try {
-      const [statsRes, recentRes, favRes, healthRes, indexRes] = await Promise.all([
+      const [statsRes, recentRes, favRes, healthRes, indexRes, tagsRes] = await Promise.all([
         fetch('/api/stats'),
         fetch('/api/recent'),
         fetch('/api/favorites'),
         fetch('/api/health'),
-        fetch('/api/index/status')
+        fetch('/api/index/status'),
+        fetch('/api/tags')
       ]);
       const statsData = await statsRes.json();
       const recentData = await recentRes.json();
       const favData = await favRes.json();
       const healthData = healthRes.ok ? await healthRes.json() : null;
       const indexData = indexRes.ok ? await indexRes.json() : null;
+      const tagsData = tagsRes.ok ? await tagsRes.json() : { tags: [] };
       
       setStats(statsData);
       setRecent(recentData.recent || []);
       setFavorites(favData.favorites || []);
       setDashboardHealth({ health: healthData, index: indexData });
+      setAvailableTags(tagsData.tags || []);
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
@@ -375,7 +226,7 @@ function App() {
           setAppConfig({
             storage_root: data.storage_root || FALLBACK_STORAGE_ROOT,
             storage_label: data.storage_label || FALLBACK_STORAGE_LABEL,
-            login_profiles: data.login_profiles || []
+            admin_lan_available: Boolean(data.admin_lan_available)
           });
           setCurrentPath((previousPath) => previousPath === FALLBACK_STORAGE_ROOT && data.storage_root ? data.storage_root : previousPath);
         }
@@ -481,6 +332,85 @@ function App() {
     setSelectedItem(item);
     setMoveTarget('');
     setActiveModal('move');
+  };
+
+  const getTagAccent = (item) => item?.tags?.[0]?.color || 'transparent';
+  const getTaggedClass = (item) => item?.tags?.length ? 'has-tags' : '';
+  const getTagStyle = (item) => ({ '--item-tag-color': getTagAccent(item) });
+
+  const updateItemTags = (path, tags) => {
+    updateManyItemTags({ [path]: tags });
+  };
+
+  const updateManyItemTags = (tagsByPath) => {
+    const applyTags = (item) => tagsByPath[item.path] ? { ...item, tags: tagsByPath[item.path] } : item;
+    setFolderContents(prev => prev.map(applyTags));
+    setRecent(prev => prev.map(applyTags));
+    setFavorites(prev => prev.map(applyTags));
+    setCategoryFiles(prev => prev.map(applyTags));
+    setSelectedItem(prev => prev && tagsByPath[prev.path] ? { ...prev, tags: tagsByPath[prev.path] } : prev);
+    setInspectorItem(prev => prev && tagsByPath[prev.path] ? { ...prev, tags: tagsByPath[prev.path] } : prev);
+    setMobileActiveItem(prev => prev && tagsByPath[prev.path] ? { ...prev, tags: tagsByPath[prev.path] } : prev);
+    setPreviewItem(prev => prev && tagsByPath[prev.path] ? { ...prev, tags: tagsByPath[prev.path] } : prev);
+  };
+
+  const openTagModal = (item) => {
+    setSelectedItem(item);
+    setTagDraft({ name: '', color: availableTags[0]?.color || '#2563eb' });
+    setApplyTagsToContents(false);
+    setActiveModal('tags');
+  };
+
+  const setTagsForItem = async (item, tagNames) => {
+    const res = await fetch('/api/files/tags', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: item.path, tags: tagNames, apply_to_contents: applyTagsToContents && item.type === 'Folder' })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || 'Failed to update tags');
+      return;
+    }
+    const data = await res.json();
+    if (data.tags_by_path) {
+      updateManyItemTags(data.tags_by_path);
+    } else {
+      updateItemTags(item.path, data.tags || []);
+    }
+  };
+
+  const toggleTagOnSelectedItem = async (tagName) => {
+    if (!selectedItem) return;
+    const existingNames = (selectedItem.tags || []).map(tag => tag.name);
+    const nextNames = existingNames.includes(tagName)
+      ? existingNames.filter(name => name !== tagName)
+      : [...existingNames, tagName];
+    await setTagsForItem(selectedItem, nextNames);
+  };
+
+  const createCustomTag = async (e) => {
+    e.preventDefault();
+    const name = tagDraft.name.trim();
+    if (!name || !selectedItem) return;
+    const res = await fetch('/api/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color: tagDraft.color })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || 'Failed to create tag');
+      return;
+    }
+    const data = await res.json();
+    const tag = data.tag;
+    setAvailableTags(prev => [...prev.filter(item => item.name !== tag.name), tag].sort((a, b) => a.name.localeCompare(b.name)));
+    setTagDraft({ name: '', color: tag.color });
+    const existingNames = (selectedItem.tags || []).map(item => item.name);
+    if (!existingNames.includes(tag.name)) {
+      await setTagsForItem(selectedItem, [...existingNames, tag.name]);
+    }
   };
 
   const handleRenameSubmit = async (e) => {
@@ -855,20 +785,47 @@ function App() {
     }
   };
 
+  const fetchCategoryPage = async (category, offset = 0) => {
+    const res = await fetch(`/api/files/category?category=${encodeURIComponent(category)}&limit=${CATEGORY_PAGE_SIZE}&offset=${offset}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : data.items || [];
+    setCategoryFiles(prev => {
+      if (offset === 0) return items;
+      const existingPaths = new Set(prev.map(item => item.path));
+      return [...prev, ...items.filter(item => !existingPaths.has(item.path))];
+    });
+    setCategoryPagination({
+      total: Array.isArray(data) ? offset + items.length : data.total || offset + items.length,
+      hasMore: Array.isArray(data) ? false : Boolean(data.has_more)
+    });
+  };
+
   const openCategory = async (category) => {
     setActiveCategory(category);
     setCurrentView('categoryGallery');
+    setCategoryFiles([]);
+    setCategoryPagination({ total: 0, hasMore: false });
+    setCollapsedTimelineGroups(new Set());
     setLoadingCategory(true);
     try {
-      const res = await fetch(`/api/files/category?category=${category}`);
-      if (res.ok) {
-        const data = await res.json();
-        setCategoryFiles(data);
-      }
+      await fetchCategoryPage(category, 0);
     } catch (e) {
       console.error("Error fetching category files:", e);
     } finally {
       setLoadingCategory(false);
+    }
+  };
+
+  const loadMoreCategoryFiles = async () => {
+    if (!activeCategory || loadingCategory || loadingMoreCategory || !categoryPagination.hasMore) return;
+    setLoadingMoreCategory(true);
+    try {
+      await fetchCategoryPage(activeCategory, categoryFiles.length);
+    } catch (e) {
+      console.error("Error loading more category files:", e);
+    } finally {
+      setLoadingMoreCategory(false);
     }
   };
 
@@ -1089,7 +1046,7 @@ function App() {
     const requests = [
       fetch('/api/trash').then(r => r.ok ? r.json() : { trash: [] }),
       fetch('/api/duplicates').then(r => r.ok ? r.json() : { duplicates: [] }),
-      fetch('/api/activity').then(r => r.ok ? r.json() : { activity: [] }),
+      fetch(user?.role === 'admin' ? '/api/admin/activity?limit=300' : '/api/activity').then(r => r.ok ? r.json() : { activity: [] }),
       fetch('/api/index/status').then(r => r.ok ? r.json() : null)
     ];
     if (user?.role === 'admin') {
@@ -1111,6 +1068,59 @@ function App() {
 
   const openTools = async () => {
     setActiveModal('tools');
+    await loadToolsData();
+  };
+
+  const openAdminDashboard = async () => {
+    if (user?.role !== 'admin') return;
+    if (!appConfig.admin_lan_available) {
+      alert('Admin Dashboard is available only on the local network.');
+      return;
+    }
+    setCurrentView('admin');
+    setActiveModal(null);
+    setMobileMenuOpen(false);
+    await loadToolsData();
+  };
+
+  const generateSecretCode = () => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const bytes = new Uint8Array(6);
+    window.crypto?.getRandomValues?.(bytes);
+    const code = Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
+    setNewUserForm(prev => ({ ...prev, first_login_secret_code: code }));
+  };
+
+  const createAdminUser = async (event) => {
+    event.preventDefault();
+    if (user?.role !== 'admin') return;
+    const res = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newUserForm)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.detail || 'Failed to create user');
+      return;
+    }
+    setNewUserForm({ username: '', display_name: '', role: 'user', password: '', first_login_secret_code: '' });
+    await loadToolsData();
+  };
+
+  const deleteAdminUser = async (profile) => {
+    if (user?.role !== 'admin') return;
+    if (profile.username === user.username) {
+      alert('You cannot delete your own account while logged in.');
+      return;
+    }
+    if (!window.confirm(`Remove user ${profile.display_name || profile.username}? This also removes their device registrations and file permissions.`)) return;
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(profile.username)}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.detail || 'Failed to remove user');
+      return;
+    }
     await loadToolsData();
   };
 
@@ -1227,6 +1237,14 @@ ${url}`);
     return '/' + parts.slice(0, -1).join('/');
   };
 
+  const openFileLocation = (item) => {
+    if (!item?.path) return;
+    const parentPath = getParentPath(item.path);
+    closeContextMenu();
+    setMobileActiveItem(null);
+    openFolder(parentPath, { selectedPath: item.path });
+  };
+
   const previewImageIndex = previewItem?.type === 'Image'
     ? imagePreviewItems.findIndex(item => item.path === previewItem.path)
     : -1;
@@ -1265,9 +1283,102 @@ ${url}`);
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const getModifiedDate = (value) => {
+    if (!value) return new Date(0);
+    if (typeof value === 'number') {
+      return new Date(value < 1000000000000 ? value * 1000 : value);
+    }
+    const numericValue = Number(value);
+    if (!Number.isNaN(numericValue)) {
+      return new Date(numericValue < 1000000000000 ? numericValue * 1000 : numericValue);
+    }
+    const parsedDate = new Date(typeof value === 'string' ? value.replace(' ', 'T') : value);
+    return Number.isNaN(parsedDate.getTime()) ? new Date(0) : parsedDate;
+  };
+
   const formatDate = (value) => {
     if (!value) return 'Unknown';
-    return new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    return getModifiedDate(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  const formatTimelineLabel = (date, mode = categoryTimelineMode) => {
+    if (!date || date.getTime() === 0) return mode === 'month' ? 'Unknown month' : 'Unknown date';
+    if (mode === 'month') {
+      return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    }
+    const today = new Date();
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const dayDiff = Math.round((startOfToday - startOfDate) / 86400000);
+    if (dayDiff === 0) return 'Today';
+    if (dayDiff === 1) return 'Yesterday';
+    return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const getTimelineGroupKey = (date) => {
+    if (!date || date.getTime() === 0) return `${categoryTimelineMode}-unknown`;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    if (categoryTimelineMode === 'month') return `month-${year}-${month}`;
+    const day = String(date.getDate()).padStart(2, '0');
+    return `date-${year}-${month}-${day}`;
+  };
+
+  const toggleTimelineGroup = (groupKey) => {
+    setCollapsedTimelineGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  };
+
+  const categoryTimelineGroups = useMemo(() => {
+    const groups = new Map();
+    [...categoryFiles]
+      .sort((a, b) => getModifiedDate(b.modified).getTime() - getModifiedDate(a.modified).getTime() || a.name.localeCompare(b.name))
+      .forEach((item) => {
+        const modifiedDate = getModifiedDate(item.modified);
+        const groupKey = getTimelineGroupKey(modifiedDate);
+        if (!groups.has(groupKey)) {
+          groups.set(groupKey, {
+            key: groupKey,
+            label: formatTimelineLabel(modifiedDate),
+            items: []
+          });
+        }
+        groups.get(groupKey).items.push(item);
+      });
+    return Array.from(groups.values());
+  }, [categoryFiles, categoryTimelineMode]);
+
+
+  const scrubToTimelineGroup = (index) => {
+    const group = categoryTimelineGroups[index];
+    if (!group) return;
+    setActiveTimelineScrubLabel(group.label);
+    setCollapsedTimelineGroups(prev => {
+      const next = new Set(prev);
+      next.delete(group.key);
+      return next;
+    });
+    window.requestAnimationFrame(() => {
+      const target = mainContentRef.current?.querySelector(`[data-timeline-group="${group.key}"]`);
+      target?.scrollIntoView({ behavior: 'auto', block: 'start' });
+    });
+    if (index >= categoryTimelineGroups.length - 2 && categoryPagination.hasMore && !loadingMoreCategory) {
+      loadMoreCategoryFiles();
+    }
+  };
+
+  const handleTimelineScrub = (event) => {
+    if (categoryTimelineGroups.length === 0) return;
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+    const percent = rect.height > 0 ? y / rect.height : 0;
+    const index = Math.min(categoryTimelineGroups.length - 1, Math.max(0, Math.round(percent * (categoryTimelineGroups.length - 1))));
+    scrubToTimelineGroup(index);
   };
 
 
@@ -1294,7 +1405,7 @@ ${url}`);
   }
 
   if (!user) {
-    return <Login onLoginSuccess={handleLoginSuccess} profiles={appConfig.login_profiles} />;
+    return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
   const favoriteFolders = favorites.filter(f => f.type === 'Folder');
@@ -1337,11 +1448,11 @@ ${url}`);
     return rootName || firstName;
   })();
   const categoryCards = [
-    { label: 'Images', count: stats.images, meta: 'image files', icon: ImageIcon, color: '#3a7bd5', action: () => openCategory('Images') },
-    { label: 'Videos', count: stats.videos, meta: 'video files', icon: Video, color: '#8a2387', action: () => openCategory('Videos') },
-    { label: 'Music', count: stats.music, meta: 'audio files', icon: Music, color: '#10b981', action: () => openCategory('Music') },
-    { label: 'Documents', count: stats.files, meta: 'other files', icon: FileText, color: '#f59e0b', action: () => openCategory('Files') },
-    { label: 'Folders', count: stats.folders, meta: 'folders', icon: Folder, color: '#0f766e', action: () => openFolder(storageRoot) }
+    { label: 'Images', count: stats.images, item: { type: 'Image', name: 'Images' }, color: '#3a7bd5', action: () => openCategory('Images') },
+    { label: 'Videos', count: stats.videos, item: { type: 'Video', name: 'Videos' }, color: '#8a2387', action: () => openCategory('Videos') },
+    { label: 'Music', count: stats.music, item: { type: 'Music', name: 'Music' }, color: '#10b981', action: () => openCategory('Music') },
+    { label: 'Documents', count: stats.files, item: { type: 'Text', name: 'Documents.docx' }, color: '#f59e0b', action: () => openCategory('Files') },
+    { label: 'Folders', count: stats.folders, item: { type: 'Folder', name: 'Folders' }, color: '#0f766e', action: () => openFolder(storageRoot) }
   ];
   const lastIndexLabel = dashboardHealth.index?.database_modified
     ? new Date(dashboardHealth.index.database_modified * 1000).toLocaleString()
@@ -1449,7 +1560,7 @@ ${url}`);
             onClick={() => { openFolder(storageRoot); setMobileMenuOpen(false); }}
             title="All Files"
           >
-            <Folder size={20} style={{ minWidth: '20px' }} />
+            <ItemTypeIcon item={{ type: 'Folder', name: 'All Files' }} size={22} style={{ minWidth: '22px' }} />
             {!sidebarCollapsed && <span className="nav-text">All Files</span>}
           </div>
           <div className="nav-item" title="Favorites">
@@ -1476,6 +1587,16 @@ ${url}`);
             <Copy size={20} style={{ minWidth: '20px' }} />
             {!sidebarCollapsed && <span className="nav-text">Duplicates</span>}
           </div>
+          {user.role === 'admin' && appConfig.admin_lan_available && (
+            <div
+              className={`nav-item ${currentView === 'admin' ? 'active' : ''}`}
+              onClick={openAdminDashboard}
+              title="Admin Dashboard"
+            >
+              <ShieldCheck size={20} style={{ minWidth: '20px' }} />
+              {!sidebarCollapsed && <span className="nav-text">Admin</span>}
+            </div>
+          )}
         </nav>
 
         {!sidebarCollapsed && (
@@ -1521,7 +1642,7 @@ ${url}`);
       </aside>
 
       {/* Main Content */}
-      <main className="main-content">
+      <main className="main-content" ref={mainContentRef}>
         <header className="header">
           {/* Mobile hamburger menu trigger */}
           <button className="mobile-menu-trigger" onClick={() => setMobileMenuOpen(true)}>
@@ -1659,6 +1780,15 @@ ${url}`);
                   >
                     Tools & Admin
                   </button>
+                  {user.role === 'admin' && appConfig.admin_lan_available && (
+                    <button
+                      onClick={openAdminDashboard}
+                      className="dropdown-tools-btn"
+                      style={{ display: 'flex', width: '100%', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '8px', border: 'none', background: 'transparent', color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', textAlign: 'left' }}
+                    >
+                      Admin Dashboard
+                    </button>
+                  )}
                   <button 
                     onClick={handleLogout}
                     style={{ display: 'flex', width: '100%', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '8px', border: 'none', background: 'transparent', color: '#ef4444', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s' }}
@@ -1681,7 +1811,11 @@ ${url}`);
               </button>
               <div className="gallery-title-row" style={{ textAlign: 'right' }}>
                 <h2 className="gallery-title" style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-main)' }}>{activeCategory} Library</h2>
-                <span className="gallery-count" style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>{loadingCategory ? 'Loading...' : `${categoryFiles.length} items`}</span>
+                <span className="gallery-count" style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>{loadingCategory ? 'Loading...' : `${categoryFiles.length}${categoryPagination.total > categoryFiles.length ? ` of ${categoryPagination.total}` : ''} items`}</span>
+                <div className="category-timeline-mode" aria-label="Timeline grouping">
+                  <button type="button" className={categoryTimelineMode === 'date' ? 'active' : ''} onClick={() => { setCategoryTimelineMode('date'); setCollapsedTimelineGroups(new Set()); }}>Day</button>
+                  <button type="button" className={categoryTimelineMode === 'month' ? 'active' : ''} onClick={() => { setCategoryTimelineMode('month'); setCollapsedTimelineGroups(new Set()); }}>Month</button>
+                </div>
               </div>
             </div>
             
@@ -1692,62 +1826,96 @@ ${url}`);
               </div>
             ) : categoryFiles.length === 0 ? (
               <div className="empty-state" style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 500 }}>No {activeCategory.toLowerCase()} found on your drive.</div>
-            ) : activeCategory === 'Images' ? (
-              <div className="image-masonry-grid">
-                {categoryFiles.map((item, idx) => (
-                  <div 
-                    key={idx} 
-                    className="masonry-item" 
-                    onDoubleClick={() => openPreview(item)}
-                    title="Double click to preview"
-                  >
-                    <div className="mobile-media-card-header">
-                      <ImageIcon size={20} className="mobile-media-card-icon image" />
-                      <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
-                      <button className="mobile-media-card-menu" onClick={(e) => { e.stopPropagation(); openPreview(item); }} title="Preview">
-                        <MoreVertical size={22} />
-                      </button>
-                    </div>
-                    <div className="masonry-thumb-container">
-                      <img 
-                        src={authUrl('/api/thumbnail', item.path)} 
-                        alt={item.name} 
-                        className="masonry-img" 
-                        loading="lazy"
-                      />
-                      <div className="masonry-overlay">
-                        <span className="masonry-name">{item.name}</span>
-                        <span className="masonry-size">{formatSize(item.size)}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
             ) : (
-              <div className="files-grid animate-fade-in" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '16px' }}>
-                {categoryFiles.map((item, idx) => (
-                  <div 
-                    key={idx} 
-                    className="fm-item grid-item"
-                    onDoubleClick={() => openPreview(item)}
-                    style={{ background: 'white', padding: '20px', borderRadius: '16px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', cursor: 'pointer', transition: 'all 0.2s' }}
-                  >
-                    <div className="mobile-media-card-header">
-                      <ItemTypeIcon item={item} size={20} className={`mobile-media-card-icon ${item.type === 'File' || item.type === 'PDF' || item.type === 'Text' ? 'file' : item.type.toLowerCase()}`} />
-                      <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
-                      <button className="mobile-media-card-menu" onClick={(e) => { e.stopPropagation(); openPreview(item); }} title="Preview">
-                        <MoreVertical size={22} />
-                      </button>
+              <div className="category-timeline">
+                {categoryTimelineGroups.map((group) => (
+                  <section className="category-timeline-section" key={group.key} data-timeline-group={group.key}>
+                    <button
+                      type="button"
+                      className={`category-timeline-header ${collapsedTimelineGroups.has(group.key) ? 'collapsed' : 'expanded'}`}
+                      onClick={() => toggleTimelineGroup(group.key)}
+                      aria-expanded={!collapsedTimelineGroups.has(group.key)}
+                    >
+                      <span className="category-timeline-line"></span>
+                      <span className="category-timeline-date">{group.label}</span>
+                      <span className="category-timeline-count">{group.items.length} {group.items.length === 1 ? 'item' : 'items'}</span>
+                      {collapsedTimelineGroups.has(group.key) ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+                    </button>
+                    {!collapsedTimelineGroups.has(group.key) && (
+                    <div className="category-timeline-grid">
+                      {group.items.map((item) => (
+                        <div
+                          key={item.path}
+                          className={`category-timeline-card fm-item grid-item ${isFullPreviewImageItem(item) ? 'is-image' : 'is-compact'} ${getTaggedClass(item)}`}
+                          style={getTagStyle(item)}
+                          onDoubleClick={() => openPreview(item)}
+                          title="Double click to preview"
+                        >
+                          <div className="mobile-media-card-header">
+                            <ItemTypeIcon item={item} size={20} className={`mobile-media-card-icon ${item.type === 'File' || item.type === 'PDF' || item.type === 'Text' ? 'file' : item.type.toLowerCase()}`} />
+                            <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
+                            <button className="mobile-media-card-menu" onClick={(e) => { e.stopPropagation(); openPreview(item); }} title="Preview">
+                              <MoreVertical size={22} />
+                            </button>
+                          </div>
+
+                          {isFullPreviewImageItem(item) ? (
+                            <div className="category-timeline-thumb">
+                              <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} loading="lazy" />
+                            </div>
+                          ) : (
+                            <div className="category-timeline-icon">
+                              <ItemTypeIcon item={item} size={46} />
+                            </div>
+                          )}
+
+                          <div className="category-timeline-info">
+                            <span className="category-timeline-name" title={item.name}>{item.name}</span>
+                            <span>{formatSize(item.size)} - {formatDate(item.modified)}</span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="file-card-icon" style={{ width: '64px', height: '64px', borderRadius: '12px', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <ItemTypeIcon item={item} size={42} />
-                    </div>
-                    <div className="file-card-info" style={{ textAlign: 'center', width: '100%' }}>
-                      <span className="file-card-name" title={item.name} style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
-                      <span className="file-card-size" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{formatSize(item.size)}</span>
-                    </div>
-                  </div>
+                    )}
+                  </section>
                 ))}
+                <div className="category-load-more" ref={categoryLoadMoreRef}>
+                  {loadingMoreCategory ? (
+                    <><Loader2 size={18} className="spin" /> Loading more...</>
+                  ) : categoryPagination.hasMore ? (
+                    <button type="button" onClick={loadMoreCategoryFiles}>Load more</button>
+                  ) : categoryFiles.length > 0 ? (
+                    <span>All items loaded</span>
+                  ) : null}
+                </div>
+                <div
+                  className="category-timeline-scrubber"
+                  onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); handleTimelineScrub(event); }}
+                  onPointerMove={(event) => { if (event.buttons) handleTimelineScrub(event); }}
+                  onPointerUp={() => setActiveTimelineScrubLabel('')}
+                  onPointerCancel={() => setActiveTimelineScrubLabel('')}
+                  role="slider"
+                  aria-label="Timeline scrubber"
+                  aria-valuemin={1}
+                  aria-valuemax={Math.max(categoryTimelineGroups.length, 1)}
+                  aria-valuenow={Math.max(categoryTimelineGroups.findIndex(group => group.label === activeTimelineScrubLabel) + 1, 1)}
+                >
+                  <div className="category-timeline-scrubber-track">
+                    {categoryTimelineGroups.map((group) => (
+                      <button
+                        type="button"
+                        key={group.key}
+                        className={`category-timeline-scrubber-mark ${group.label === activeTimelineScrubLabel ? 'active' : ''}`}
+                        onClick={(event) => { event.stopPropagation(); scrubToTimelineGroup(categoryTimelineGroups.findIndex(item => item.key === group.key)); }}
+                        title={group.label}
+                        aria-label={`Jump to ${group.label}`}
+                      >
+                        <span>{categoryTimelineMode === 'month' ? group.label.split(' ')[0].slice(0, 3) : group.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {activeTimelineScrubLabel && <div className="category-timeline-scrubber-bubble">{activeTimelineScrubLabel}</div>}
+                </div>
               </div>
             )}
           </div>
@@ -1755,10 +1923,10 @@ ${url}`);
           <div className="dashboard-home-layout animate-fade-in">
             <section className="dashboard-home-primary">
               <div className="dashboard-card-grid">
-              {categoryCards.map(({ label, count, icon: Icon, color, action }) => (
+              {categoryCards.map(({ label, count, item, color, action }) => (
                 <button key={label} className="dashboard-type-card" onClick={action} style={{ '--type-accent': color }}>
                   <span className="type-card-accent"></span>
-                  <span className="type-card-icon"><Icon size={18} /></span>
+                  <span className="type-card-icon"><ItemTypeIcon item={item} size={26} /></span>
                   <span className="type-card-copy">
                     <strong>{label}</strong>
                     <small>{loading ? '...' : count}</small>
@@ -1776,7 +1944,7 @@ ${url}`);
         ) : favoriteFolders.length > 0 ? (
           <div className="favorites-grid animate-fade-in">
             {favoriteFolders.map((folder, idx) => (
-              <div key={idx} className="favorite-folder-card" onClick={() => openFolder(folder.path)}>
+              <div key={idx} className={`favorite-folder-card ${getTaggedClass(folder)}`} style={getTagStyle(folder)} onClick={() => openFolder(folder.path)}>
                 <ItemTypeIcon item={folder} size={30} className="favorite-folder-icon" />
                 <div className="favorite-folder-info">
                   <span className="favorite-folder-name">{folder.name}</span>
@@ -1818,9 +1986,11 @@ ${url}`);
                     return (
                       <tr
                         key={index}
-                        className="recent-row"
+                        className={`recent-row ${getTaggedClass(item)}`}
+                        style={getTagStyle(item)}
                         onClick={() => openPreview(item)}
                         onDoubleClick={() => openPreview(item)}
+                        onContextMenu={(e) => handleItemContextMenu(e, item)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
@@ -1838,6 +2008,9 @@ ${url}`);
                               <ItemTypeIcon item={item} size={18} style={{ flexShrink: 0 }} />
                             )}
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+                            <button className="recent-item-menu-btn" onClick={(e) => openItemMenu(e, item)} title="More options">
+                              <MoreVertical size={16} />
+                            </button>
                           </div>
                         </td>
                         <td>{item.type}</td>
@@ -1862,9 +2035,11 @@ ${url}`);
                 {recent.map((item, index) => (
                   <div
                     key={index}
-                    className="recent-grid-card"
+                    className={`recent-grid-card ${getTaggedClass(item)}`}
+                    style={getTagStyle(item)}
                     onClick={() => openPreview(item)}
                     onDoubleClick={() => openPreview(item)}
+                    onContextMenu={(e) => handleItemContextMenu(e, item)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
@@ -1875,6 +2050,9 @@ ${url}`);
                     role="button"
                     title={`Open ${item.name}`}
                   >
+                    <button className="recent-card-menu-btn" onClick={(e) => openItemMenu(e, item)} title="More options">
+                      <MoreVertical size={16} />
+                    </button>
                     <div className={`recent-card-icon-wrapper ${item.type === 'Image' ? 'has-thumbnail' : ''}`}>
                       {item.type === 'Image' ? (
                         <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="recent-card-thumbnail" loading="lazy" />
@@ -1895,6 +2073,124 @@ ${url}`);
             )}
           </div>
         </div>
+            </section>
+          </div>
+        ) : currentView === 'admin' && user.role === 'admin' ? (
+          <div className="admin-dashboard-view animate-fade-in">
+            <div className="section-header mobile-recent-header">
+              <span>ADMIN DASHBOARD</span>
+              <div className="section-header-actions">
+                <button className="btn-modal-secondary" onClick={loadToolsData}>Refresh</button>
+                <button className="btn-modal-primary" onClick={runReindex}>Re-index Now</button>
+              </div>
+            </div>
+
+            <div className="admin-summary-grid">
+              <div className="admin-summary-tile"><Users size={22} /><div><strong>{toolsData.users.length}</strong><span>User profiles</span></div></div>
+              <div className="admin-summary-tile"><Monitor size={22} /><div><strong>{toolsData.users.reduce((total, profile) => total + (profile.devices?.length || 0), 0)}</strong><span>Registered devices</span></div></div>
+              <div className="admin-summary-tile"><Activity size={22} /><div><strong>{toolsData.activity.length}</strong><span>Activity events</span></div></div>
+              <div className="admin-summary-tile"><KeyRound size={22} /><div><strong>{toolsData.users.filter(profile => profile.first_login_pending).length}</strong><span>Pending first logins</span></div></div>
+            </div>
+
+            <div className="admin-dashboard-grid">
+              <section className="admin-panel admin-create-user-panel">
+                <h4>Create User Profile</h4>
+                <form className="admin-user-form" onSubmit={createAdminUser}>
+                  <input value={newUserForm.display_name} onChange={(e) => setNewUserForm(prev => ({ ...prev, display_name: e.target.value }))} placeholder="Display name" required />
+                  <input value={newUserForm.username} onChange={(e) => setNewUserForm(prev => ({ ...prev, username: e.target.value }))} placeholder="Username" required />
+                  <select value={newUserForm.role} onChange={(e) => setNewUserForm(prev => ({ ...prev, role: e.target.value }))}>
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <input type="password" value={newUserForm.password} onChange={(e) => setNewUserForm(prev => ({ ...prev, password: e.target.value }))} placeholder="Temporary password" required />
+                  <div className="admin-secret-code-field">
+                    <input value={newUserForm.first_login_secret_code} onChange={(e) => setNewUserForm(prev => ({ ...prev, first_login_secret_code: e.target.value }))} placeholder="First-login secret code" maxLength={6} />
+                    <button type="button" className="admin-secret-generate-btn" onClick={generateSecretCode}>Generate</button>
+                  </div>
+                  <button className="btn-modal-primary" type="submit">Create Profile</button>
+                </form>
+              </section>
+
+              <section className="admin-panel admin-maintenance-panel">
+                <h4>Admin Tools</h4>
+                <div className="tool-row"><span>Trash items</span><small>{toolsData.trash.length}</small></div>
+                <div className="tool-row"><span>Duplicate groups</span><small>{toolsData.duplicatesTotal || toolsData.duplicates.length}</small></div>
+                <div className="tool-row"><span>Index database</span><small>{toolsData.index?.database_modified ? new Date(toolsData.index.database_modified * 1000).toLocaleString() : 'Unknown'}</small></div>
+                <div className="admin-tool-actions">
+                  <button className="btn-modal-secondary" onClick={openTrashView}>Review Trash</button>
+                  <button className="btn-modal-secondary" onClick={openDuplicatesView}>Review Duplicates</button>
+                </div>
+              </section>
+            </div>
+
+            <section className="admin-panel">
+              <h4>User Profiles & Registered Devices</h4>
+              <div className="admin-user-list">
+                {toolsData.users.length === 0 ? <div className="empty-state">No users found</div> : toolsData.users.map(profile => (
+                  <div className="admin-user-card" key={profile.username}>
+                    <div className="admin-user-card-header">
+                      <div className="admin-user-main">
+                        <div className="admin-user-avatar">{(profile.display_name || profile.username).slice(0, 2).toUpperCase()}</div>
+                        <div>
+                          <strong>{profile.display_name}</strong>
+                          <span>{profile.username} • {profile.role}</span>
+                          <small>{profile.first_login_pending ? 'First-login secret code pending' : profile.first_login_completed_at ? `First login completed ${profile.first_login_completed_at}` : 'No first-login code required'}</small>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="admin-user-delete-btn"
+                        onClick={() => deleteAdminUser(profile)}
+                        disabled={profile.username === user.username}
+                        title={profile.username === user.username ? 'You cannot remove your own account' : 'Remove user'}
+                      >
+                        <Trash2 size={15} />
+                        <span>Remove</span>
+                      </button>
+                    </div>
+                    <div className="admin-user-meta">
+                      <span>{profile.activity_count || 0} events</span>
+                      <span>Last activity: {profile.last_activity_at || 'None'}</span>
+                    </div>
+                    <div className="admin-device-list">
+                      {(profile.devices || []).length === 0 ? (
+                        <small>No registered devices yet</small>
+                      ) : profile.devices.map(device => (
+                        <div className="admin-device-row" key={device.device_id}>
+                          <Monitor size={16} />
+                          <div>
+                            <strong>{device.device_label || 'Browser device'}</strong>
+                            <span>{device.device_id}</span>
+                            <small>Last seen {device.last_seen} • IP {device.last_ip || 'unknown'} • {device.login_count} logins</small>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="admin-panel">
+              <h4>All User Activity</h4>
+              <div className="admin-activity-table-wrap">
+                <table className="recent-activity-table admin-activity-table">
+                  <thead><tr><th>TIME</th><th>USER</th><th>ACTION</th><th>PATH</th><th>DETAILS</th></tr></thead>
+                  <tbody>
+                    {toolsData.activity.length === 0 ? (
+                      <tr><td colSpan="5" className="empty-state">No activity found</td></tr>
+                    ) : toolsData.activity.map((item, idx) => (
+                      <tr key={`${item.created_at}-${idx}`}>
+                        <td>{item.created_at}</td>
+                        <td>{item.actor}</td>
+                        <td>{item.action}</td>
+                        <td title={item.path || ''}>{item.path || '-'}</td>
+                        <td title={item.details || ''}>{item.details || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </div>
         ) : currentView === 'trash' ? (
@@ -2054,7 +2350,8 @@ ${url}`);
                     {visibleFolderContents.map((item, idx) => (
                       <div 
                         key={idx} 
-                        className={`fm-item grid-item ${item.type === 'Folder' ? 'is-folder' : ''} ${isFullPreviewImageItem(item) ? 'is-image' : 'is-compact'} ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''} ${dragOverPath === item.path ? 'drag-over' : ''}`} 
+                        className={`fm-item grid-item ${item.type === 'Folder' ? 'is-folder' : ''} ${isFullPreviewImageItem(item) ? 'is-image' : 'is-compact'} ${getTaggedClass(item)} ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''} ${dragOverPath === item.path ? 'drag-over' : ''}`}
+                        style={getTagStyle(item)}
                         onClick={(e) => handleItemClick(e, item)}
                         onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
                         onContextMenu={(e) => handleItemContextMenu(e, item, false)}
@@ -2109,7 +2406,8 @@ ${url}`);
                         {visibleFolderContents.map((item, idx) => (
                           <tr 
                             key={idx} 
-                            className={`fm-list-row ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''} ${dragOverPath === item.path ? 'drag-over' : ''}`}
+                            className={`fm-list-row ${getTaggedClass(item)} ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''} ${dragOverPath === item.path ? 'drag-over' : ''}`}
+                            style={getTagStyle(item)}
                             onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
                             onClick={(e) => handleItemClick(e, item)}
                             onContextMenu={(e) => handleItemContextMenu(e, item, false)}
@@ -2195,6 +2493,14 @@ ${url}`);
               <button type="button" onClick={() => { toggleFavorite(contextMenu.item); closeContextMenu(); }}>
                 <Star size={15} />
                 <span>{contextMenu.item.is_favorite ? "Remove Favorite" : "Add Favorite"}</span>
+              </button>
+              <button type="button" onClick={() => { openTagModal(contextMenu.item); closeContextMenu(); }}>
+                <Tag size={15} />
+                <span>Tags</span>
+              </button>
+              <button type="button" onClick={() => openFileLocation(contextMenu.item)}>
+                <Folder size={15} />
+                <span>Open File Location</span>
               </button>
               <button type="button" onClick={() => { handleMoveClick(contextMenu.item); closeContextMenu(); }}>
                 <MoveRight size={15} />
@@ -2297,6 +2603,64 @@ ${url}`);
             <div className="modal-footer">
               <button type="button" className="btn-modal-secondary" onClick={() => setActiveModal(null)}>Cancel</button>
               <button type="button" className="btn-modal-danger" onClick={handleDeleteSubmit}>Move to Trash</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tags Modal */}
+      {activeModal === 'tags' && selectedItem && (
+        <div className="modal-backdrop" onClick={() => setActiveModal(null)}>
+          <div className="modal-content glass tag-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Tags for {selectedItem.name}</h3>
+            <p className="modal-text">First selected tag controls the item color.</p>
+            {selectedItem.type === 'Folder' && (
+              <label className="tag-propagate-option">
+                <input
+                  type="checkbox"
+                  checked={applyTagsToContents}
+                  onChange={(e) => setApplyTagsToContents(e.target.checked)}
+                />
+                <span>Apply these tags to all contents inside this folder</span>
+              </label>
+            )}
+            <div className="tag-option-grid">
+              {availableTags.map(tag => {
+                const active = (selectedItem.tags || []).some(itemTag => itemTag.name === tag.name);
+                return (
+                  <button
+                    key={tag.name}
+                    type="button"
+                    className={active ? 'tag-option active' : 'tag-option'}
+                    style={{ '--tag-color': tag.color }}
+                    onClick={() => toggleTagOnSelectedItem(tag.name)}
+                  >
+                    <span className="tag-swatch"></span>
+                    <span>{tag.name}</span>
+                    {active && <Check size={14} />}
+                  </button>
+                );
+              })}
+            </div>
+            <form className="tag-create-form" onSubmit={createCustomTag}>
+              <input
+                type="text"
+                className="modal-input"
+                value={tagDraft.name}
+                onChange={(e) => setTagDraft(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="Custom tag name"
+              />
+              <input
+                type="color"
+                className="tag-color-input"
+                value={tagDraft.color}
+                onChange={(e) => setTagDraft(prev => ({ ...prev, color: e.target.value }))}
+                title="Tag color"
+              />
+              <button type="submit" className="btn-modal-primary">Add</button>
+            </form>
+            <div className="modal-footer">
+              <button type="button" className="btn-modal-secondary" onClick={() => setActiveModal(null)}>Done</button>
             </div>
           </div>
         </div>
@@ -2584,6 +2948,25 @@ ${url}`);
                 <span>{mobileActiveItem.is_favorite ? 'Remove from Favorites' : 'Add to Favorites'}</span>
               </button>
               
+              <button 
+                className="mobile-sheet-action-btn"
+                onClick={() => {
+                  openTagModal(mobileActiveItem);
+                  setMobileActiveItem(null);
+                }}
+              >
+                <Tag size={16} color="#64748b" />
+                <span>Tags</span>
+              </button>
+
+              <button 
+                className="mobile-sheet-action-btn"
+                onClick={() => openFileLocation(mobileActiveItem)}
+              >
+                <Folder size={16} color="#64748b" />
+                <span>Open File Location</span>
+              </button>
+
               <button 
                 className="mobile-sheet-action-btn"
                 onClick={() => {
