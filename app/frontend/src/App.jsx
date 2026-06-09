@@ -87,6 +87,8 @@ function App() {
   const [loadingMoreCategory, setLoadingMoreCategory] = useState(false);
   const [categoryPagination, setCategoryPagination] = useState({ total: 0, hasMore: false });
   const [categoryTimelineMode, setCategoryTimelineMode] = useState('date');
+  const [categoryDocumentGroupBy, setCategoryDocumentGroupBy] = useState('none');
+  const [categoryDocumentTypeFilter, setCategoryDocumentTypeFilter] = useState('All');
   const [collapsedTimelineGroups, setCollapsedTimelineGroups] = useState(() => new Set());
   const categoryLoadMoreRef = useRef(null);
   const mainContentRef = useRef(null);
@@ -793,6 +795,8 @@ function App() {
     setSelectedPaths([]);
     setInspectorItem(null);
     setCategoryPagination({ total: 0, hasMore: false });
+    setCategoryDocumentGroupBy('none');
+    setCategoryDocumentTypeFilter('All');
     setCollapsedTimelineGroups(new Set());
     setLoadingCategory(true);
     try {
@@ -1462,17 +1466,43 @@ ${url}`);
   }
 
   const favoriteFolders = favorites.filter(f => f.type === 'Folder');
-  const visibleFolderContents = folderContents
-    .filter(item => typeFilter === 'All' || item.type === typeFilter)
-    .sort((a, b) => {
+  const sortFileItems = (items, keepFoldersFirst = true) => [...items].sort((a, b) => {
+    if (keepFoldersFirst) {
       if (a.type === 'Folder' && b.type !== 'Folder') return -1;
       if (a.type !== 'Folder' && b.type === 'Folder') return 1;
-      if (sortBy === 'size') return (b.size || 0) - (a.size || 0);
-      if (sortBy === 'modified') return (b.modified || 0) - (a.modified || 0);
-      if (sortBy === 'type') return a.type.localeCompare(b.type) || a.name.localeCompare(b.name);
-      return a.name.localeCompare(b.name);
+    }
+    if (sortBy === 'size') return (b.size || 0) - (a.size || 0);
+    if (sortBy === 'modified') return getModifiedDate(b.modified).getTime() - getModifiedDate(a.modified).getTime();
+    if (sortBy === 'type') return a.type.localeCompare(b.type) || a.name.localeCompare(b.name);
+    return a.name.localeCompare(b.name);
+  });
+  const visibleFolderContents = sortFileItems(
+    folderContents.filter(item => typeFilter === 'All' || item.type === typeFilter)
+  );
+  const isDocumentCategory = currentView === 'categoryGallery' && activeCategory === 'Files';
+  const activeCategoryLabel = activeCategory === 'Files' ? 'Documents' : activeCategory;
+  const visibleCategoryDocuments = sortFileItems(
+    categoryFiles.filter(item => categoryDocumentTypeFilter === 'All' || item.type === categoryDocumentTypeFilter),
+    false
+  );
+  const categoryDocumentGroups = (() => {
+    if (categoryDocumentGroupBy === 'none') return [{ key: 'all', label: 'All documents', items: visibleCategoryDocuments }];
+    const groups = new Map();
+    visibleCategoryDocuments.forEach((item) => {
+      const modifiedDate = getModifiedDate(item.modified);
+      const key = categoryDocumentGroupBy === 'date'
+        ? 'date-' + modifiedDate.getFullYear() + '-' + String(modifiedDate.getMonth() + 1).padStart(2, '0')
+        : 'type-' + (item.type || 'File');
+      const label = categoryDocumentGroupBy === 'date'
+        ? formatTimelineLabel(modifiedDate, 'month')
+        : item.type || 'File';
+      if (!groups.has(key)) groups.set(key, { key, label, items: [] });
+      groups.get(key).items.push(item);
     });
-  const selectionScopeItems = currentView === 'categoryGallery' ? categoryFiles : visibleFolderContents;
+    return Array.from(groups.values());
+  })();
+  const categoryVisibleItems = isDocumentCategory ? visibleCategoryDocuments : categoryFiles;
+  const selectionScopeItems = currentView === 'categoryGallery' ? categoryVisibleItems : visibleFolderContents;
   const selectionScopePaths = selectionScopeItems.map(item => item.path);
   const selectedVisibleCount = selectionScopePaths.filter(path => selectedPaths.includes(path)).length;
   const allVisibleSelected = selectionScopePaths.length > 0 && selectedVisibleCount === selectionScopePaths.length;
@@ -1549,6 +1579,169 @@ ${url}`);
       </button>
     </div>
   );
+  const renderGridItems = (items) => items.map((item, idx) => (
+    <div
+      key={item.path || idx}
+      className={[
+        "fm-item",
+        "grid-item",
+        item.type === "Folder" ? "is-folder" : "",
+        isFullPreviewImageItem(item) ? "is-image" : "is-compact",
+        getTaggedClass(item),
+        selectedPaths.includes(item.path) ? "checked" : "",
+        inspectorItem?.path === item.path ? "inspected" : "",
+        dragOverPath === item.path ? "drag-over" : ""
+      ].filter(Boolean).join(" ")}
+      style={getTagStyle(item)}
+      onClick={(e) => handleItemClick(e, item)}
+      onPointerDown={(e) => startMobileLongPress(e, item)}
+      onPointerUp={clearMobileLongPress}
+      onPointerCancel={clearMobileLongPress}
+      onPointerLeave={clearMobileLongPress}
+      onDoubleClick={() => item.type === "Folder" ? openFolder(item.path) : openPreview(item)}
+      onContextMenu={(e) => handleItemContextMenu(e, item, false)}
+      draggable
+      onDragStart={(e) => handleItemDragStart(e, item)}
+      onDragEnd={() => setDragOverPath(null)}
+      onDragOver={(e) => handleFolderDragOver(e, item)}
+      onDragLeave={() => dragOverPath === item.path && setDragOverPath(null)}
+      onDrop={(e) => handleFolderDrop(e, item)}
+    >
+      <label
+        className={["fm-grid-checkbox", selectedPaths.includes(item.path) ? "visible" : ""].filter(Boolean).join(" ")}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (e.target === e.currentTarget) {
+            e.preventDefault();
+            toggleSelectItem(item.path, e);
+          }
+        }}
+        title={selectedPaths.includes(item.path) ? "Deselect item" : "Select item"}
+      >
+        <input
+          type="checkbox"
+          checked={selectedPaths.includes(item.path)}
+          onChange={(e) => toggleSelectItem(item.path, e)}
+          aria-label={(selectedPaths.includes(item.path) ? "Deselect" : "Select") + " " + item.name}
+        />
+      </label>
+      <div className="mobile-media-card-header">
+        <ItemTypeIcon item={item} size={20} className={["mobile-media-card-icon", item.type === "File" || item.type === "PDF" || item.type === "Text" ? "file" : item.type.toLowerCase()].filter(Boolean).join(" ")} />
+        <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
+        <button className="mobile-media-card-menu" onClick={(e) => openItemMenu(e, item)} title="More options">
+          <MoreVertical size={22} />
+        </button>
+      </div>
+      <button
+        className="item-options-btn"
+        onClick={(e) => openItemMenu(e, item)}
+        title="More options"
+      >
+        <MoreVertical size={14} />
+      </button>
+
+      {isFullPreviewImageItem(item) ? (
+        <div className="fm-thumbnail-container">
+          <img src={authUrl("/api/thumbnail", item.path)} alt={item.name} className="fm-thumbnail" loading="lazy" />
+        </div>
+      ) : (
+        <div className="fm-icon-container">
+          <ItemTypeIcon item={item} size={52} className="fm-icon" />
+        </div>
+      )}
+      <div className="fm-item-name" title={item.name}>{item.name}</div>
+    </div>
+  ));
+
+  const renderListView = (items) => (
+    <div className="fm-list-view">
+      <table className="fm-list-table">
+        <thead>
+          <tr>
+            <th className="fm-select-column">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                ref={(input) => { if (input) input.indeterminate = someVisibleSelected; }}
+                onChange={toggleSelectAll}
+                disabled={items.length === 0}
+                aria-label="Select all visible items"
+              />
+            </th>
+            <th>NAME</th>
+            <th>TYPE</th>
+            <th>SIZE</th>
+            <th>MODIFIED</th>
+            <th style={{ textAlign: "right" }}>ACTIONS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, idx) => (
+            <tr
+              key={item.path || idx}
+              className={[
+                "fm-list-row",
+                getTaggedClass(item),
+                selectedPaths.includes(item.path) ? "checked" : "",
+                inspectorItem?.path === item.path ? "inspected" : "",
+                dragOverPath === item.path ? "drag-over" : ""
+              ].filter(Boolean).join(" ")}
+              style={getTagStyle(item)}
+              onDoubleClick={() => item.type === "Folder" ? openFolder(item.path) : openPreview(item)}
+              onClick={(e) => handleItemClick(e, item)}
+              onPointerDown={(e) => startMobileLongPress(e, item)}
+              onPointerUp={clearMobileLongPress}
+              onPointerCancel={clearMobileLongPress}
+              onPointerLeave={clearMobileLongPress}
+              onContextMenu={(e) => handleItemContextMenu(e, item, false)}
+              draggable
+              onDragStart={(e) => handleItemDragStart(e, item)}
+              onDragEnd={() => setDragOverPath(null)}
+              onDragOver={(e) => handleFolderDragOver(e, item)}
+              onDragLeave={() => dragOverPath === item.path && setDragOverPath(null)}
+              onDrop={(e) => handleFolderDrop(e, item)}
+            >
+              <td className="fm-select-column" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={selectedPaths.includes(item.path)}
+                  onChange={(e) => toggleSelectItem(item.path, e)}
+                  aria-label={(selectedPaths.includes(item.path) ? "Deselect" : "Select") + " " + item.name}
+                />
+              </td>
+              <td>
+                <div className="fm-list-name-cell">
+                  {item.type === "Image" ? (
+                    <div className="fm-list-thumbnail-container">
+                      <img src={authUrl("/api/thumbnail", item.path)} alt={item.name} className="fm-list-thumbnail" loading="lazy" />
+                    </div>
+                  ) : (
+                    <ItemTypeIcon item={item} size={22} />
+                  )}
+                  <span className="fm-list-item-name" title={item.name}>{item.name}</span>
+                </div>
+              </td>
+              <td>{item.type}</td>
+              <td>{item.type === "Folder" ? "--" : formatSize(item.size)}</td>
+              <td>{formatDate(item.modified)}</td>
+              <td>
+                <div className="fm-list-actions">
+                  <button
+                    className="item-options-btn"
+                    onClick={(e) => openItemMenu(e, item)}
+                    title="More options"
+                  >
+                    <MoreVertical size={14} />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   return (
     <div className={`dashboard ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileMenuOpen ? 'mobile-sidebar-open' : ''}`} onClick={() => contextMenu && closeContextMenu()}>
       {/* Mobile Backdrop */}
@@ -1893,16 +2086,18 @@ ${url}`);
           </div>
         </header>
 
-        {currentView === 'categoryGallery' ? (
-          <div className="category-gallery-view animate-fade-in">
-            <div className="gallery-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-              <button className="btn-back" onClick={() => setCurrentView('dashboard')} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '12px', border: '1px solid var(--border-color)', background: 'white', fontWeight: 600, color: 'var(--text-main)', cursor: 'pointer', transition: 'all 0.2s' }}>
+        {currentView === "categoryGallery" ? (
+          <div className={["category-gallery-view", "animate-fade-in", isDocumentCategory ? "document-category-view" : ""].filter(Boolean).join(" ")}>
+            <div className="gallery-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", flexWrap: "wrap", gap: "16px" }}>
+              <button className="btn-back" onClick={() => setCurrentView("dashboard")} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 20px", borderRadius: "12px", border: "1px solid var(--border-color)", background: "white", fontWeight: 600, color: "var(--text-main)", cursor: "pointer", transition: "all 0.2s" }}>
                 <ArrowLeft size={18} />
                 Back to Home
               </button>
-              <div className="gallery-title-row" style={{ textAlign: 'right' }}>
-                <h2 className="gallery-title" style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-main)' }}>{activeCategory} Library</h2>
-                <span className="gallery-count" style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>{loadingCategory ? 'Loading...' : `${categoryFiles.length}${categoryPagination.total > categoryFiles.length ? ` of ${categoryPagination.total}` : ''} items`}</span>
+              <div className="gallery-title-row" style={{ textAlign: "right" }}>
+                <h2 className="gallery-title" style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "var(--text-main)" }}>{activeCategoryLabel} Library</h2>
+                <span className="gallery-count" style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 500 }}>
+                  {loadingCategory ? "Loading..." : (categoryPagination.total > categoryVisibleItems.length ? categoryVisibleItems.length + " of " + categoryPagination.total : categoryVisibleItems.length) + " items"}
+                </span>
                 <div className="category-header-actions">
                   {selectedPaths.length > 0 ? renderSelectionActions() : (
                     <>
@@ -1910,102 +2105,167 @@ ${url}`);
                         type="button"
                         className={"category-select-btn " + (someVisibleSelected || allVisibleSelected ? "active" : "")}
                         onClick={toggleSelectAll}
-                        disabled={categoryFiles.length === 0}
-                        aria-label={allVisibleSelected ? "Deselect all loaded category items" : "Select all loaded category items"}
+                        disabled={categoryVisibleItems.length === 0}
+                        aria-label={allVisibleSelected ? "Deselect all visible category items" : "Select all visible category items"}
                       >
                         <CheckSquare size={15} />
                         <span>{allVisibleSelected ? "Deselect" : selectedVisibleCount > 0 ? selectedVisibleCount + " selected" : "Select"}</span>
                       </button>
-                      <div className="category-timeline-mode" aria-label="Timeline grouping">
-                        <button type="button" className={categoryTimelineMode === "date" ? "active" : ""} onClick={() => { setCategoryTimelineMode("date"); setCollapsedTimelineGroups(new Set()); }}>Day</button>
-                        <button type="button" className={categoryTimelineMode === "month" ? "active" : ""} onClick={() => { setCategoryTimelineMode("month"); setCollapsedTimelineGroups(new Set()); }}>Month</button>
-                      </div>
+                      {isDocumentCategory ? (
+                        <>
+                          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort documents">
+                            <option value="name">Sort: Name</option>
+                            <option value="modified">Sort: Modified</option>
+                            <option value="size">Sort: Size</option>
+                            <option value="type">Sort: Type</option>
+                          </select>
+                          <select value={categoryDocumentTypeFilter} onChange={(e) => setCategoryDocumentTypeFilter(e.target.value)} aria-label="Filter documents by file type">
+                            <option value="All">All types</option>
+                            <option value="PDF">PDFs</option>
+                            <option value="Text">Text</option>
+                            <option value="File">Files</option>
+                          </select>
+                          <select value={categoryDocumentGroupBy} onChange={(e) => setCategoryDocumentGroupBy(e.target.value)} aria-label="Group documents">
+                            <option value="none">Group: None</option>
+                            <option value="date">Group: Date</option>
+                            <option value="type">Group: File Type</option>
+                          </select>
+                          <div className="view-mode-toggle desktop-only-view-toggle">
+                            <button className={"btn-icon " + (effectiveViewMode === "grid" ? "active" : "")} onClick={() => setViewMode("grid")} title="Grid view">
+                              <LayoutGrid size={18} />
+                            </button>
+                            <button className={"btn-icon " + (effectiveViewMode === "list" ? "active" : "")} onClick={() => setViewMode("list")} title="List view">
+                              <List size={18} />
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="category-timeline-mode" aria-label="Timeline grouping">
+                          <button type="button" className={categoryTimelineMode === "date" ? "active" : ""} onClick={() => { setCategoryTimelineMode("date"); setCollapsedTimelineGroups(new Set()); }}>Day</button>
+                          <button type="button" className={categoryTimelineMode === "month" ? "active" : ""} onClick={() => { setCategoryTimelineMode("month"); setCollapsedTimelineGroups(new Set()); }}>Month</button>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
               </div>
             </div>
-            
+
             {loadingCategory ? (
-              <div className="gallery-loading" style={{ padding: '60px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', color: 'var(--text-muted)' }}>
+              <div className="gallery-loading" style={{ padding: "60px", display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", color: "var(--text-muted)" }}>
                 <Loader2 size={36} className="spin" color="var(--primary)" />
-                <span style={{ fontWeight: 500 }}>Loading {activeCategory.toLowerCase()}...</span>
+                <span style={{ fontWeight: 500 }}>Loading {activeCategoryLabel.toLowerCase()}...</span>
               </div>
-            ) : categoryFiles.length === 0 ? (
-              <div className="empty-state" style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 500 }}>No {activeCategory.toLowerCase()} found on your drive.</div>
+            ) : categoryVisibleItems.length === 0 ? (
+              <div className="empty-state" style={{ padding: "60px", textAlign: "center", color: "var(--text-muted)", fontWeight: 500 }}>No {activeCategoryLabel.toLowerCase()} found on your drive.</div>
+            ) : isDocumentCategory ? (
+              <div className="document-category-browser">
+                {categoryDocumentGroups.map((group) => (
+                  <section className="document-category-group" key={group.key}>
+                    {categoryDocumentGroupBy !== "none" && (
+                      <div className="document-category-group-header">
+                        <span>{group.label}</span>
+                        <small>{group.items.length} {group.items.length === 1 ? "item" : "items"}</small>
+                      </div>
+                    )}
+                    {effectiveViewMode === "grid" ? (
+                      <div className="fm-grid">
+                        {renderGridItems(group.items)}
+                      </div>
+                    ) : renderListView(group.items)}
+                  </section>
+                ))}
+                <div className="category-load-more" ref={categoryLoadMoreRef}>
+                  {loadingMoreCategory ? (
+                    <><Loader2 size={18} className="spin" /> Loading more...</>
+                  ) : categoryPagination.hasMore ? (
+                    <button type="button" onClick={loadMoreCategoryFiles}>Load more</button>
+                  ) : categoryVisibleItems.length > 0 ? (
+                    <span>All items loaded</span>
+                  ) : null}
+                </div>
+              </div>
             ) : (
               <div className="category-timeline">
                 {categoryTimelineGroups.map((group) => (
                   <section className="category-timeline-section" key={group.key} data-timeline-group={group.key}>
                     <button
                       type="button"
-                      className={`category-timeline-header ${collapsedTimelineGroups.has(group.key) ? 'collapsed' : 'expanded'}`}
+                      className={"category-timeline-header " + (collapsedTimelineGroups.has(group.key) ? "collapsed" : "expanded")}
                       onClick={() => toggleTimelineGroup(group.key)}
                       aria-expanded={!collapsedTimelineGroups.has(group.key)}
                     >
                       <span className="category-timeline-line"></span>
                       <span className="category-timeline-date">{group.label}</span>
-                      <span className="category-timeline-count">{group.items.length} {group.items.length === 1 ? 'item' : 'items'}</span>
+                      <span className="category-timeline-count">{group.items.length} {group.items.length === 1 ? "item" : "items"}</span>
                       {collapsedTimelineGroups.has(group.key) ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
                     </button>
                     {!collapsedTimelineGroups.has(group.key) && (
-                    <div className="category-timeline-grid">
-                      {group.items.map((item) => (
-                        <div
-                          key={item.path}
-                          className={`category-timeline-card fm-item grid-item ${isFullPreviewImageItem(item) ? 'is-image' : 'is-compact'} ${getTaggedClass(item)} ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''}`}
-                          style={getTagStyle(item)}
-                          onClick={(e) => handleItemClick(e, item)}
-                          onPointerDown={(e) => startMobileLongPress(e, item)}
-                          onPointerUp={clearMobileLongPress}
-                          onPointerCancel={clearMobileLongPress}
-                          onPointerLeave={clearMobileLongPress}
-                          onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
-                          title={item.type === 'Folder' ? 'Double click to open folder' : 'Double click to preview'}
-                        >
-                          <label
-                            className={`fm-grid-checkbox ${selectedPaths.includes(item.path) ? 'visible' : ''}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (e.target === e.currentTarget) {
-                                e.preventDefault();
-                                toggleSelectItem(item.path, e);
-                              }
-                            }}
-                            title={selectedPaths.includes(item.path) ? 'Deselect item' : 'Select item'}
+                      <div className="category-timeline-grid">
+                        {group.items.map((item) => (
+                          <div
+                            key={item.path}
+                            className={[
+                              "category-timeline-card",
+                              "fm-item",
+                              "grid-item",
+                              isFullPreviewImageItem(item) ? "is-image" : "is-compact",
+                              getTaggedClass(item),
+                              selectedPaths.includes(item.path) ? "checked" : "",
+                              inspectorItem?.path === item.path ? "inspected" : ""
+                            ].filter(Boolean).join(" ")}
+                            style={getTagStyle(item)}
+                            onClick={(e) => handleItemClick(e, item)}
+                            onPointerDown={(e) => startMobileLongPress(e, item)}
+                            onPointerUp={clearMobileLongPress}
+                            onPointerCancel={clearMobileLongPress}
+                            onPointerLeave={clearMobileLongPress}
+                            onDoubleClick={() => item.type === "Folder" ? openFolder(item.path) : openPreview(item)}
+                            title={item.type === "Folder" ? "Double click to open folder" : "Double click to preview"}
                           >
-                            <input
-                              type="checkbox"
-                              checked={selectedPaths.includes(item.path)}
-                              onChange={(e) => toggleSelectItem(item.path, e)}
-                              aria-label={`${selectedPaths.includes(item.path) ? 'Deselect' : 'Select'} ${item.name}`}
-                            />
-                          </label>
-                          <div className="mobile-media-card-header">
-                            <ItemTypeIcon item={item} size={20} className={`mobile-media-card-icon ${item.type === 'File' || item.type === 'PDF' || item.type === 'Text' ? 'file' : item.type.toLowerCase()}`} />
-                            <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
-                            <button className="mobile-media-card-menu" onClick={(e) => { e.stopPropagation(); item.type === 'Folder' ? openFolder(item.path) : openPreview(item); }} title={item.type === 'Folder' ? 'Open folder' : 'Preview'}>
-                              <MoreVertical size={22} />
-                            </button>
-                          </div>
-
-                          {isFullPreviewImageItem(item) ? (
-                            <div className="category-timeline-thumb">
-                              <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} loading="lazy" />
+                            <label
+                              className={["fm-grid-checkbox", selectedPaths.includes(item.path) ? "visible" : ""].filter(Boolean).join(" ")}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (e.target === e.currentTarget) {
+                                  e.preventDefault();
+                                  toggleSelectItem(item.path, e);
+                                }
+                              }}
+                              title={selectedPaths.includes(item.path) ? "Deselect item" : "Select item"}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedPaths.includes(item.path)}
+                                onChange={(e) => toggleSelectItem(item.path, e)}
+                                aria-label={(selectedPaths.includes(item.path) ? "Deselect" : "Select") + " " + item.name}
+                              />
+                            </label>
+                            <div className="mobile-media-card-header">
+                              <ItemTypeIcon item={item} size={20} className={["mobile-media-card-icon", item.type === "File" || item.type === "PDF" || item.type === "Text" ? "file" : item.type.toLowerCase()].filter(Boolean).join(" ")} />
+                              <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
+                              <button className="mobile-media-card-menu" onClick={(e) => { e.stopPropagation(); item.type === "Folder" ? openFolder(item.path) : openPreview(item); }} title={item.type === "Folder" ? "Open folder" : "Preview"}>
+                                <MoreVertical size={22} />
+                              </button>
                             </div>
-                          ) : (
-                            <div className="category-timeline-icon">
-                              <ItemTypeIcon item={item} size={46} />
-                            </div>
-                          )}
 
-                          <div className="category-timeline-info">
-                            <span className="category-timeline-name" title={item.name}>{item.name}</span>
-                            <span>{item.type === 'Folder' ? 'Folder' : formatSize(item.size)} - {formatDate(item.modified)}</span>
+                            {isFullPreviewImageItem(item) ? (
+                              <div className="category-timeline-thumb">
+                                <img src={authUrl("/api/thumbnail", item.path)} alt={item.name} loading="lazy" />
+                              </div>
+                            ) : (
+                              <div className="category-timeline-icon">
+                                <ItemTypeIcon item={item} size={46} />
+                              </div>
+                            )}
+
+                            <div className="category-timeline-info">
+                              <span className="category-timeline-name" title={item.name}>{item.name}</span>
+                              <span>{item.type === "Folder" ? "Folder" : formatSize(item.size)} - {formatDate(item.modified)}</span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
                     )}
                   </section>
                 ))}
@@ -2022,8 +2282,8 @@ ${url}`);
                   className="category-timeline-scrubber"
                   onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); handleTimelineScrub(event); }}
                   onPointerMove={(event) => { if (event.buttons) handleTimelineScrub(event); }}
-                  onPointerUp={() => setActiveTimelineScrubLabel('')}
-                  onPointerCancel={() => setActiveTimelineScrubLabel('')}
+                  onPointerUp={() => setActiveTimelineScrubLabel("")}
+                  onPointerCancel={() => setActiveTimelineScrubLabel("")}
                   role="slider"
                   aria-label="Timeline scrubber"
                   aria-valuemin={1}
@@ -2035,12 +2295,12 @@ ${url}`);
                       <button
                         type="button"
                         key={group.key}
-                        className={`category-timeline-scrubber-mark ${group.label === activeTimelineScrubLabel ? 'active' : ''}`}
+                        className={"category-timeline-scrubber-mark " + (group.label === activeTimelineScrubLabel ? "active" : "")}
                         onClick={(event) => { event.stopPropagation(); scrubToTimelineGroup(categoryTimelineGroups.findIndex(item => item.key === group.key)); }}
                         title={group.label}
-                        aria-label={`Jump to ${group.label}`}
+                        aria-label={"Jump to " + group.label}
                       >
-                        <span>{categoryTimelineMode === 'month' ? group.label.split(' ')[0].slice(0, 3) : group.label}</span>
+                        <span>{categoryTimelineMode === "month" ? group.label.split(" ")[0].slice(0, 3) : group.label}</span>
                       </button>
                     ))}
                   </div>
