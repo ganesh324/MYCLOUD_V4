@@ -1389,10 +1389,10 @@ async def get_files_by_category(
             where_clause = f"extension IN ({placeholders})"
             params = tuple(ext_filter)
         elif exclude_others:
-            all_media = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | MUSIC_EXTENSIONS | PDF_EXTENSIONS | TEXT_EXTENSIONS
-            placeholders = ",".join(["?"] * len(all_media))
+            media_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | MUSIC_EXTENSIONS
+            placeholders = ",".join(["?"] * len(media_extensions))
             where_clause = f"extension NOT IN ({placeholders}) AND extension != 'directory'"
-            params = tuple(all_media)
+            params = tuple(media_extensions)
 
         count_cursor = await db.execute(f"SELECT COUNT(*) AS total FROM files WHERE {where_clause}", params)
         total = (await count_cursor.fetchone())["total"]
