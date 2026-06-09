@@ -1341,6 +1341,8 @@ async def search_files(q: str = "", user: dict = Depends(get_current_user)):
                 item_type = "PDF"
             elif ext in TEXT_EXTENSIONS:
                 item_type = "Text"
+            elif ext == "directory":
+                item_type = "Folder"
             else:
                 item_type = "File"
                 
@@ -1374,6 +1376,9 @@ async def get_files_by_category(
         ext_filter = MUSIC_EXTENSIONS
     elif category == "Files":
         exclude_others = True
+    elif category == "Folders":
+        where_clause = "extension = 'directory'"
+        params = ()
     else:
         raise HTTPException(status_code=400, detail="Invalid category")
         
@@ -1415,6 +1420,8 @@ async def get_files_by_category(
                 item_type = "PDF"
             elif ext in TEXT_EXTENSIONS:
                 item_type = "Text"
+            elif ext == "directory":
+                item_type = "Folder"
             else:
                 item_type = "File"
                 

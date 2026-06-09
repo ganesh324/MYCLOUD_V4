@@ -33,8 +33,8 @@ The compose stack runs:
 
 Mounted paths:
 
-- `./app/data` -> `/app/data` for SQLite data and thumbnails.
 - `./app/data` -> `/app/data` for SQLite data, thumbnails, and local environment values.
+- `./scripts` -> `/app/scripts` so backend admin tools can run the shared scripts.
 - `${MYCLOUD_STORAGE_ROOT}` -> `${MYCLOUD_STORAGE_ROOT}` for your storage drive.
 
 Before using this outside your home network, set a strong `MYCLOUD_SECRET_KEY` in `app/data/mycloud.env`.

@@ -2,7 +2,7 @@
 
 # Configuration Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+APP_DIR="${MYCLOUD_APP_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 ENV_FILE="${MYCLOUD_ENV_FILE:-$APP_DIR/app/data/mycloud.env}"
 if [ -f "$ENV_FILE" ]; then
   set -a

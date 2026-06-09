@@ -5,7 +5,8 @@ import sqlite3
 from datetime import datetime
 
 # Path Configurations
-DATA_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "data"))
+APP_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
+DATA_DIR = os.path.join(APP_DIR, "app", "data")
 ENV_PATH = os.environ.get("MYCLOUD_ENV_FILE", os.path.join(DATA_DIR, "mycloud.env"))
 
 

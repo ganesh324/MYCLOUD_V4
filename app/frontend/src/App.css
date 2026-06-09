@@ -1767,6 +1767,19 @@
   border-bottom-color: rgba(58, 123, 213, 0.1);
 }
 
+.fm-select-column {
+  width: 42px;
+  min-width: 42px;
+  max-width: 42px;
+  text-align: center;
+}
+
+.fm-list-table th.fm-select-column,
+.fm-list-table td.fm-select-column {
+  padding-left: 14px;
+  padding-right: 8px;
+}
+
 .fm-grid-checkbox {
   position: absolute;
   top: 12px;
@@ -1814,6 +1827,29 @@
   border-color: var(--primary);
 }
 
+.category-gallery-view .category-timeline-card .fm-grid-checkbox {
+  opacity: 0 !important;
+  width: 30px !important;
+  height: 30px !important;
+  top: 8px !important;
+  left: 8px !important;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.16);
+  pointer-events: none;
+}
+
+.category-gallery-view .category-timeline-card.checked .fm-grid-checkbox,
+.category-gallery-view .category-timeline-card .fm-grid-checkbox.visible {
+  opacity: 1 !important;
+  pointer-events: auto;
+}
+
+.category-gallery-view .category-timeline-card .fm-grid-checkbox input[type="checkbox"] {
+  width: 20px !important;
+  height: 20px !important;
+}
+
 .fm-grid-checkbox input[type="checkbox"]:checked::before,
 .fm-list-row input[type="checkbox"]:checked::before,
 .fm-list-table input[type="checkbox"]:checked::before {
@@ -1826,7 +1862,7 @@
 /* Floating Batch Action Tray */
 .batch-tray-container {
   position: fixed;
-  bottom: 24px;
+  top: 18px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
@@ -1900,6 +1936,19 @@
   background: #dc2626;
 }
 
+.btn-batch.icon-only {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+
+.btn-batch.icon-only:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
 .batch-divider {
   width: 1px;
   height: 24px;
@@ -1923,6 +1972,47 @@
 
 .batch-tray .close-btn:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+
+@media (max-width: 768px) {
+  .batch-tray-container {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    transform: none;
+  }
+
+  .batch-tray {
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 14px;
+    flex-direction: column;
+  }
+
+  .batch-actions-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .btn-batch {
+    justify-content: center;
+    padding: 8px 6px;
+    min-width: 0;
+    font-size: 0.72rem;
+  }
+
+  .btn-batch span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .batch-divider {
+    display: none;
+  }
 }
 
 /* ==========================================================================
@@ -4073,6 +4163,15 @@
   .fm-list-table th:last-child {
     width: 72px !important;
     padding-right: 14px !important;
+  }
+
+  .fm-list-row td.fm-select-column,
+  .fm-list-table th.fm-select-column {
+    width: 42px !important;
+    min-width: 42px !important;
+    max-width: 42px !important;
+    padding-left: 14px !important;
+    padding-right: 8px !important;
   }
 
   .fm-list-actions,
@@ -8022,6 +8121,49 @@ body,
   color: var(--primary);
 }
 
+.category-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.category-select-btn {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.category-select-btn:hover,
+.category-select-btn.active {
+  border-color: rgba(58, 123, 213, 0.28);
+  background: var(--accent-soft);
+  color: var(--primary);
+}
+
+.category-select-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.category-gallery-view .category-timeline-card.checked {
+  border-color: var(--primary) !important;
+  background: rgba(58, 123, 213, 0.05) !important;
+  box-shadow: 0 0 0 2px rgba(58, 123, 213, 0.16) !important;
+}
+
+
 .category-timeline {
   display: flex;
   flex-direction: column;
@@ -8186,6 +8328,18 @@ body,
     grid-template-columns: minmax(0, 1fr) auto 16px;
     gap: 8px;
     margin: 2px 0 8px;
+  }
+
+
+  .category-header-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .category-select-btn {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 0.7rem;
   }
 
   .category-timeline-count {
@@ -8409,4 +8563,58 @@ body,
 .category-load-more button:hover {
   border-color: rgba(58, 123, 213, 0.36);
   background: #f8fafc;
+}
+
+
+/* Final category selection affordance: keep image/category taps visibly selected across desktop and mobile overrides. */
+.category-gallery-view .category-timeline-card {
+  position: relative !important;
+}
+
+.category-gallery-view .category-timeline-card.checked {
+  border-color: var(--primary) !important;
+  background: rgba(58, 123, 213, 0.07) !important;
+  box-shadow: 0 0 0 3px rgba(58, 123, 213, 0.22), 0 10px 22px rgba(15, 23, 42, 0.10) !important;
+}
+
+.category-gallery-view .category-timeline-card.checked::after {
+  content: "✓";
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 900;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.22);
+  pointer-events: none;
+  z-index: 12;
+}
+
+.category-gallery-view .category-timeline-card.checked .category-timeline-thumb,
+.category-gallery-view .category-timeline-card.checked .category-timeline-icon {
+  outline: 3px solid rgba(58, 123, 213, 0.32);
+  outline-offset: -3px;
+}
+
+@media (max-width: 768px) {
+  .category-gallery-view .category-timeline-card.checked {
+    border: 2px solid var(--primary) !important;
+    background: rgba(58, 123, 213, 0.08) !important;
+    box-shadow: 0 0 0 2px rgba(58, 123, 213, 0.18) !important;
+  }
+
+  .category-gallery-view .category-timeline-card.checked::after {
+    top: 6px;
+    right: 6px;
+    width: 24px;
+    height: 24px;
+    font-size: 13px;
+  }
 }

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Home, Folder, Star, Share2, Search, Upload, Plus, 
   Menu, MoreVertical, Image as ImageIcon, Music, FileText, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft,
-  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, Loader2, Download, AlignLeft, X, MoveRight, Copy, Clipboard, Scissors, RotateCcw, RotateCw, FlipHorizontal, ZoomIn, ZoomOut, Save, Maximize2, Minimize2, Tag, Users, Activity, KeyRound, Monitor, ShieldCheck
+  LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, Loader2, Download, AlignLeft, X, MoveRight, Copy, Clipboard, Scissors, RotateCcw, RotateCw, FlipHorizontal, ZoomIn, ZoomOut, Save, Maximize2, Minimize2, Tag, Users, Activity, KeyRound, Monitor, ShieldCheck, CheckSquare
 } from 'lucide-react';
 import ItemTypeIcon, { isFullPreviewImageItem } from './components/ItemTypeIcon';
 import { authUrl, installAuthFetchInterceptor } from './utils/api';
@@ -92,6 +92,8 @@ function App() {
   const [activeTimelineScrubLabel, setActiveTimelineScrubLabel] = useState('');
   
   const [selectedPaths, setSelectedPaths] = useState([]);
+  const mobileLongPressTimerRef = useRef(null);
+  const mobileLongPressTriggeredRef = useRef(false);
   const [inspectorItem, setInspectorItem] = useState(null);
   const [mobileActiveItem, setMobileActiveItem] = useState(null);
   const [sortBy, setSortBy] = useState('name');
@@ -805,6 +807,8 @@ function App() {
     setActiveCategory(category);
     setCurrentView('categoryGallery');
     setCategoryFiles([]);
+    setSelectedPaths([]);
+    setInspectorItem(null);
     setCategoryPagination({ total: 0, hasMore: false });
     setCollapsedTimelineGroups(new Set());
     setLoadingCategory(true);
@@ -833,6 +837,9 @@ function App() {
     e.preventDefault();
     e.stopPropagation();
     setInspectorItem(item);
+    if (item && !selectedPaths.includes(item.path)) {
+      setSelectedPaths([item.path]);
+    }
     if (window.matchMedia('(max-width: 768px)').matches) {
       setMobileActiveItem(item);
       return;
@@ -840,13 +847,68 @@ function App() {
     setContextMenu({ x: e.clientX, y: e.clientY, item });
   };
 
+  const isMobileSelectionViewport = () => window.matchMedia('(max-width: 768px)').matches;
+
+  const enterMobileSelectionMode = (item) => {
+    if (!item?.path) return;
+    setInspectorItem(item);
+    setSelectedPaths(prev => prev.includes(item.path) ? prev : [...prev, item.path]);
+    navigator.vibrate?.(20);
+  };
+
+  const startMobileLongPress = (e, item) => {
+    if (!isMobileSelectionViewport() || !item?.path) return;
+    if (e.target.closest('button, input, label, select, a')) return;
+    window.clearTimeout(mobileLongPressTimerRef.current);
+    mobileLongPressTriggeredRef.current = false;
+    mobileLongPressTimerRef.current = window.setTimeout(() => {
+      mobileLongPressTriggeredRef.current = true;
+      enterMobileSelectionMode(item);
+    }, 450);
+  };
+
+  const clearMobileLongPress = () => {
+    window.clearTimeout(mobileLongPressTimerRef.current);
+  };
+
   const handleItemContextMenu = (e, item) => {
+    if (isMobileSelectionViewport()) {
+      e.preventDefault();
+      e.stopPropagation();
+      enterMobileSelectionMode(item);
+      return;
+    }
     openItemMenu(e, item);
   };
 
   const handleItemClick = (e, item) => {
     setInspectorItem(item);
     closeContextMenu();
+    if (isMobileSelectionViewport()) {
+      if (mobileLongPressTriggeredRef.current) {
+        mobileLongPressTriggeredRef.current = false;
+        return;
+      }
+      if (selectedPaths.length > 0) {
+        setSelectedPaths(prev => prev.includes(item.path) ? prev.filter(path => path !== item.path) : [...prev, item.path]);
+        return;
+      }
+      if (currentView === 'categoryGallery' || currentView === 'fileManager') {
+        item.type === 'Folder' ? openFolder(item.path) : openPreview(item);
+        return;
+      }
+    }
+    if (e.shiftKey) {
+      const scopeItems = currentView === 'categoryGallery' ? categoryFiles : folderContents;
+      const anchorIndex = scopeItems.findIndex(scopeItem => scopeItem.path === inspectorItem?.path);
+      const itemIndex = scopeItems.findIndex(scopeItem => scopeItem.path === item.path);
+      if (anchorIndex >= 0 && itemIndex >= 0) {
+        const [start, end] = [anchorIndex, itemIndex].sort((a, b) => a - b);
+        const rangePaths = scopeItems.slice(start, end + 1).map(scopeItem => scopeItem.path);
+        setSelectedPaths(prev => Array.from(new Set([...prev, ...rangePaths])));
+        return;
+      }
+    }
     if (e.ctrlKey || e.metaKey) {
       setSelectedPaths(prev => prev.includes(item.path) ? prev.filter(path => path !== item.path) : [...prev, item.path]);
       return;
@@ -953,7 +1015,8 @@ function App() {
   };
 
   const toggleSelectAll = () => {
-    const allPaths = folderContents.map(i => i.path);
+    const scopeItems = currentView === 'categoryGallery' ? categoryFiles : folderContents;
+    const allPaths = scopeItems.map(i => i.path);
     const allSelected = allPaths.every(p => selectedPaths.includes(p));
     if (allSelected) {
       setSelectedPaths(prev => prev.filter(p => !allPaths.includes(p)));
@@ -966,7 +1029,8 @@ function App() {
   };
 
   const handleBulkFavorite = async () => {
-    const itemsToFavorite = folderContents
+    const scopeItems = currentView === 'categoryGallery' ? categoryFiles : folderContents;
+    const itemsToFavorite = scopeItems
       .filter(item => selectedPaths.includes(item.path))
       .map(item => ({
         path: item.path,
@@ -985,7 +1049,11 @@ function App() {
       if (res.ok) {
         setSelectedPaths([]);
         fetchStats();
-        openFolder(currentPath);
+        if (currentView === 'categoryGallery' && activeCategory) {
+          openCategory(activeCategory);
+        } else {
+          openFolder(currentPath);
+        }
       } else {
         alert("Failed to star selected items");
       }
@@ -1007,7 +1075,11 @@ function App() {
       });
       if (res.ok) {
         setSelectedPaths([]);
-        openFolder(currentPath);
+        if (currentView === 'categoryGallery' && activeCategory) {
+          openCategory(activeCategory);
+        } else {
+          openFolder(currentPath);
+        }
         fetchStats();
       } else {
         alert("Failed to delete selected items");
@@ -1419,6 +1491,11 @@ ${url}`);
       if (sortBy === 'type') return a.type.localeCompare(b.type) || a.name.localeCompare(b.name);
       return a.name.localeCompare(b.name);
     });
+  const selectionScopeItems = currentView === 'categoryGallery' ? categoryFiles : visibleFolderContents;
+  const selectionScopePaths = selectionScopeItems.map(item => item.path);
+  const selectedVisibleCount = selectionScopePaths.filter(path => selectedPaths.includes(path)).length;
+  const allVisibleSelected = selectionScopePaths.length > 0 && selectedVisibleCount === selectionScopePaths.length;
+  const someVisibleSelected = selectedVisibleCount > 0 && !allVisibleSelected;
 
   const totalIndexedFiles = stats.images + stats.videos + stats.music + stats.files;
   const storageSegments = [
@@ -1452,7 +1529,7 @@ ${url}`);
     { label: 'Videos', count: stats.videos, item: { type: 'Video', name: 'Videos' }, color: '#8a2387', action: () => openCategory('Videos') },
     { label: 'Music', count: stats.music, item: { type: 'Music', name: 'Music' }, color: '#10b981', action: () => openCategory('Music') },
     { label: 'Documents', count: stats.files, item: { type: 'Text', name: 'Documents.docx' }, color: '#f59e0b', action: () => openCategory('Files') },
-    { label: 'Folders', count: stats.folders, item: { type: 'Folder', name: 'Folders' }, color: '#0f766e', action: () => openFolder(storageRoot) }
+    { label: 'Folders', count: stats.folders, item: { type: 'Folder', name: 'Folders' }, color: '#0f766e', action: () => openCategory('Folders') }
   ];
   const lastIndexLabel = dashboardHealth.index?.database_modified
     ? new Date(dashboardHealth.index.database_modified * 1000).toLocaleString()
@@ -1812,9 +1889,21 @@ ${url}`);
               <div className="gallery-title-row" style={{ textAlign: 'right' }}>
                 <h2 className="gallery-title" style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-main)' }}>{activeCategory} Library</h2>
                 <span className="gallery-count" style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>{loadingCategory ? 'Loading...' : `${categoryFiles.length}${categoryPagination.total > categoryFiles.length ? ` of ${categoryPagination.total}` : ''} items`}</span>
-                <div className="category-timeline-mode" aria-label="Timeline grouping">
-                  <button type="button" className={categoryTimelineMode === 'date' ? 'active' : ''} onClick={() => { setCategoryTimelineMode('date'); setCollapsedTimelineGroups(new Set()); }}>Day</button>
-                  <button type="button" className={categoryTimelineMode === 'month' ? 'active' : ''} onClick={() => { setCategoryTimelineMode('month'); setCollapsedTimelineGroups(new Set()); }}>Month</button>
+                <div className="category-header-actions">
+                  <button
+                    type="button"
+                    className={`category-select-btn ${someVisibleSelected || allVisibleSelected ? "active" : ""}`}
+                    onClick={toggleSelectAll}
+                    disabled={categoryFiles.length === 0}
+                    aria-label={allVisibleSelected ? "Deselect all loaded category items" : "Select all loaded category items"}
+                  >
+                    <CheckSquare size={15} />
+                    <span>{allVisibleSelected ? "Deselect" : selectedVisibleCount > 0 ? `${selectedVisibleCount} selected` : "Select"}</span>
+                  </button>
+                  <div className="category-timeline-mode" aria-label="Timeline grouping">
+                    <button type="button" className={categoryTimelineMode === 'date' ? 'active' : ''} onClick={() => { setCategoryTimelineMode('date'); setCollapsedTimelineGroups(new Set()); }}>Day</button>
+                    <button type="button" className={categoryTimelineMode === 'month' ? 'active' : ''} onClick={() => { setCategoryTimelineMode('month'); setCollapsedTimelineGroups(new Set()); }}>Month</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1846,15 +1935,38 @@ ${url}`);
                       {group.items.map((item) => (
                         <div
                           key={item.path}
-                          className={`category-timeline-card fm-item grid-item ${isFullPreviewImageItem(item) ? 'is-image' : 'is-compact'} ${getTaggedClass(item)}`}
+                          className={`category-timeline-card fm-item grid-item ${isFullPreviewImageItem(item) ? 'is-image' : 'is-compact'} ${getTaggedClass(item)} ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''}`}
                           style={getTagStyle(item)}
-                          onDoubleClick={() => openPreview(item)}
-                          title="Double click to preview"
+                          onClick={(e) => handleItemClick(e, item)}
+                          onPointerDown={(e) => startMobileLongPress(e, item)}
+                          onPointerUp={clearMobileLongPress}
+                          onPointerCancel={clearMobileLongPress}
+                          onPointerLeave={clearMobileLongPress}
+                          onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
+                          title={item.type === 'Folder' ? 'Double click to open folder' : 'Double click to preview'}
                         >
+                          <label
+                            className={`fm-grid-checkbox ${selectedPaths.includes(item.path) ? 'visible' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (e.target === e.currentTarget) {
+                                e.preventDefault();
+                                toggleSelectItem(item.path, e);
+                              }
+                            }}
+                            title={selectedPaths.includes(item.path) ? 'Deselect item' : 'Select item'}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedPaths.includes(item.path)}
+                              onChange={(e) => toggleSelectItem(item.path, e)}
+                              aria-label={`${selectedPaths.includes(item.path) ? 'Deselect' : 'Select'} ${item.name}`}
+                            />
+                          </label>
                           <div className="mobile-media-card-header">
                             <ItemTypeIcon item={item} size={20} className={`mobile-media-card-icon ${item.type === 'File' || item.type === 'PDF' || item.type === 'Text' ? 'file' : item.type.toLowerCase()}`} />
                             <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
-                            <button className="mobile-media-card-menu" onClick={(e) => { e.stopPropagation(); openPreview(item); }} title="Preview">
+                            <button className="mobile-media-card-menu" onClick={(e) => { e.stopPropagation(); item.type === 'Folder' ? openFolder(item.path) : openPreview(item); }} title={item.type === 'Folder' ? 'Open folder' : 'Preview'}>
                               <MoreVertical size={22} />
                             </button>
                           </div>
@@ -1871,7 +1983,7 @@ ${url}`);
 
                           <div className="category-timeline-info">
                             <span className="category-timeline-name" title={item.name}>{item.name}</span>
-                            <span>{formatSize(item.size)} - {formatDate(item.modified)}</span>
+                            <span>{item.type === 'Folder' ? 'Folder' : formatSize(item.size)} - {formatDate(item.modified)}</span>
                           </div>
                         </div>
                       ))}
@@ -2353,6 +2465,10 @@ ${url}`);
                         className={`fm-item grid-item ${item.type === 'Folder' ? 'is-folder' : ''} ${isFullPreviewImageItem(item) ? 'is-image' : 'is-compact'} ${getTaggedClass(item)} ${selectedPaths.includes(item.path) ? 'checked' : ''} ${inspectorItem?.path === item.path ? 'inspected' : ''} ${dragOverPath === item.path ? 'drag-over' : ''}`}
                         style={getTagStyle(item)}
                         onClick={(e) => handleItemClick(e, item)}
+                        onPointerDown={(e) => startMobileLongPress(e, item)}
+                        onPointerUp={clearMobileLongPress}
+                        onPointerCancel={clearMobileLongPress}
+                        onPointerLeave={clearMobileLongPress}
                         onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
                         onContextMenu={(e) => handleItemContextMenu(e, item, false)}
                         draggable
@@ -2362,6 +2478,24 @@ ${url}`);
                         onDragLeave={() => dragOverPath === item.path && setDragOverPath(null)}
                         onDrop={(e) => handleFolderDrop(e, item)}
                       >
+                        <label
+                          className={`fm-grid-checkbox ${selectedPaths.includes(item.path) ? 'visible' : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (e.target === e.currentTarget) {
+                              e.preventDefault();
+                              toggleSelectItem(item.path, e);
+                            }
+                          }}
+                          title={selectedPaths.includes(item.path) ? 'Deselect item' : 'Select item'}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedPaths.includes(item.path)}
+                            onChange={(e) => toggleSelectItem(item.path, e)}
+                            aria-label={`${selectedPaths.includes(item.path) ? 'Deselect' : 'Select'} ${item.name}`}
+                          />
+                        </label>
                         <div className="mobile-media-card-header">
                           <ItemTypeIcon item={item} size={20} className={`mobile-media-card-icon ${item.type === 'File' || item.type === 'PDF' || item.type === 'Text' ? 'file' : item.type.toLowerCase()}`} />
                           <span className="mobile-media-card-name" title={item.name}>{item.name}</span>
@@ -2395,6 +2529,16 @@ ${url}`);
                     <table className="fm-list-table">
                       <thead>
                         <tr>
+                          <th className="fm-select-column">
+                            <input
+                              type="checkbox"
+                              checked={allVisibleSelected}
+                              ref={(input) => { if (input) input.indeterminate = someVisibleSelected; }}
+                              onChange={toggleSelectAll}
+                              disabled={visibleFolderContents.length === 0}
+                              aria-label="Select all visible items"
+                            />
+                          </th>
                           <th>NAME</th>
                           <th>TYPE</th>
                           <th>SIZE</th>
@@ -2410,6 +2554,10 @@ ${url}`);
                             style={getTagStyle(item)}
                             onDoubleClick={() => item.type === 'Folder' ? openFolder(item.path) : openPreview(item)}
                             onClick={(e) => handleItemClick(e, item)}
+                            onPointerDown={(e) => startMobileLongPress(e, item)}
+                            onPointerUp={clearMobileLongPress}
+                            onPointerCancel={clearMobileLongPress}
+                            onPointerLeave={clearMobileLongPress}
                             onContextMenu={(e) => handleItemContextMenu(e, item, false)}
                             draggable
                             onDragStart={(e) => handleItemDragStart(e, item)}
@@ -2418,6 +2566,14 @@ ${url}`);
                             onDragLeave={() => dragOverPath === item.path && setDragOverPath(null)}
                             onDrop={(e) => handleFolderDrop(e, item)}
                           >
+                            <td className="fm-select-column" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={selectedPaths.includes(item.path)}
+                                onChange={(e) => toggleSelectItem(item.path, e)}
+                                aria-label={`${selectedPaths.includes(item.path) ? 'Deselect' : 'Select'} ${item.name}`}
+                              />
+                            </td>
                             <td>
                               <div className="fm-list-name-cell">
                                 {item.type === 'Image' ? (
@@ -2459,6 +2615,44 @@ ${url}`);
         )}
 
       </main>
+
+      {selectedPaths.length > 0 && (currentView === 'fileManager' || currentView === 'categoryGallery') && (
+        <div className="batch-tray-container" role="region" aria-label="Selected item actions">
+          <div className="batch-tray glass animate-slide-up">
+            <span className="batch-count">{selectedPaths.length} selected</span>
+            <div className="batch-actions-row">
+              <button className="btn-batch secondary" type="button" onClick={toggleSelectAll} disabled={selectionScopeItems.length === 0}>
+                <CheckSquare size={16} />
+                <span>{allVisibleSelected ? 'Deselect All' : 'Select All'}</span>
+              </button>
+              <button className="btn-batch secondary" type="button" onClick={handleBulkDownload}>
+                <Download size={16} />
+                <span>Download</span>
+              </button>
+              <button className="btn-batch secondary" type="button" onClick={handleBulkFavorite}>
+                <Star size={16} />
+                <span>Favorite</span>
+              </button>
+              <button className="btn-batch secondary" type="button" onClick={() => beginClipboardOperation('cut', null)}>
+                <Scissors size={16} />
+                <span>Cut</span>
+              </button>
+              <button className="btn-batch secondary" type="button" onClick={() => beginClipboardOperation('copy', null)}>
+                <Copy size={16} />
+                <span>Copy</span>
+              </button>
+              <span className="batch-divider" />
+              <button className="btn-batch danger" type="button" onClick={handleBulkDelete}>
+                <Trash2 size={16} />
+                <span>Delete</span>
+              </button>
+              <button className="btn-batch icon-only" type="button" onClick={() => setSelectedPaths([])} title="Clear selection" aria-label="Clear selection">
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {contextMenu && (
         <div
