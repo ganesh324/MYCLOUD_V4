@@ -1839,6 +1839,8 @@
   pointer-events: none;
 }
 
+.category-gallery-view .category-timeline-card:hover .fm-grid-checkbox,
+.category-gallery-view .category-timeline-card:focus-within .fm-grid-checkbox,
 .category-gallery-view .category-timeline-card.checked .fm-grid-checkbox,
 .category-gallery-view .category-timeline-card .fm-grid-checkbox.visible {
   opacity: 1 !important;
