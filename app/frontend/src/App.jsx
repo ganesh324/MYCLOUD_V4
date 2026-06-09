@@ -1,11 +1,12 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Home, Folder, Star, Share2, Search, Upload, Plus, 
-  Menu, MoreVertical, Image as ImageIcon, Music, FileText, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft,
+  Menu, MoreVertical, Music, FileText, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft,
   LayoutGrid, List, Trash2, Edit3, CloudUpload, Check, Loader2, Download, AlignLeft, X, MoveRight, Copy, Clipboard, Scissors, RotateCcw, RotateCw, FlipHorizontal, ZoomIn, ZoomOut, Save, Maximize2, Minimize2, Tag, Users, Activity, KeyRound, Monitor, ShieldCheck, CheckSquare
 } from 'lucide-react';
-import ItemTypeIcon, { isFullPreviewImageItem } from './components/ItemTypeIcon';
+import ItemTypeIcon from './components/ItemTypeIcon';
 import { authUrl, installAuthFetchInterceptor } from './utils/api';
+import { isFullPreviewImageItem } from './utils/fileTypes';
 import './App.css';
 import Login from './Login';
 
@@ -100,7 +101,6 @@ function App() {
   const [typeFilter, setTypeFilter] = useState('All');
   const [toolsData, setToolsData] = useState({ trash: [], duplicates: [], duplicatesTotal: 0, users: [], activity: [], index: null, maintenance: { logs: {} } });
   const [newUserForm, setNewUserForm] = useState({ username: '', display_name: '', role: 'user', password: '', first_login_secret_code: '' });
-  const [operationTarget, setOperationTarget] = useState('');
   const [availableTags, setAvailableTags] = useState([]);
   const [tagDraft, setTagDraft] = useState({ name: '', color: '#2563eb' });
   const [applyTagsToContents, setApplyTagsToContents] = useState(false);
@@ -116,33 +116,10 @@ function App() {
       if (event.matches) setViewMode('grid');
     };
 
-    setIsMobileViewport(mediaQuery.matches);
-    if (mediaQuery.matches) setViewMode('grid');
     mediaQuery.addEventListener('change', handleViewportChange);
     return () => mediaQuery.removeEventListener('change', handleViewportChange);
   }, []);
 
-  useEffect(() => {
-    if (imageEditMode && previewItem?.type === 'Image') {
-      drawEditedImage();
-    }
-  }, [imageEditMode, imageTransform, previewItem]);
-
-
-  useEffect(() => {
-    if (currentView !== 'categoryGallery' || loadingCategory || loadingMoreCategory || !categoryPagination.hasMore) return;
-    const sentinel = categoryLoadMoreRef.current;
-    if (!sentinel) return;
-
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some(entry => entry.isIntersecting)) {
-        loadMoreCategoryFiles();
-      }
-    }, { rootMargin: '700px 0px' });
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [currentView, activeCategory, categoryFiles.length, categoryPagination.hasMore, loadingCategory, loadingMoreCategory]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -508,12 +485,12 @@ function App() {
       } else {
         setIsPreviewFullscreen(prev => !prev);
       }
-    } catch (error) {
+    } catch {
       setIsPreviewFullscreen(prev => !prev);
     }
   };
 
-  const drawEditedImage = () => {
+  const drawEditedImage = useCallback(() => {
     const canvas = editCanvasRef.current;
     const img = editImageRef.current;
     if (!canvas || !img || !img.complete || !img.naturalWidth) return;
@@ -536,7 +513,13 @@ function App() {
     const zoom = Math.max(0.4, Math.min(3, imageTransform.zoom));
     ctx.drawImage(img, -(width * zoom) / 2, -(height * zoom) / 2, width * zoom, height * zoom);
     ctx.restore();
-  };
+  }, [imageTransform]);
+
+  useEffect(() => {
+    if (imageEditMode && previewItem?.type === 'Image') {
+      drawEditedImage();
+    }
+  }, [drawEditedImage, imageEditMode, previewItem]);
 
   const updateImageTransform = (patch) => {
     setImageTransform(prev => ({ ...prev, ...patch }));
@@ -787,7 +770,7 @@ function App() {
     }
   };
 
-  const fetchCategoryPage = async (category, offset = 0) => {
+  const fetchCategoryPage = useCallback(async (category, offset = 0) => {
     const res = await fetch(`/api/files/category?category=${encodeURIComponent(category)}&limit=${CATEGORY_PAGE_SIZE}&offset=${offset}`);
     if (!res.ok) return;
     const data = await res.json();
@@ -801,7 +784,7 @@ function App() {
       total: Array.isArray(data) ? offset + items.length : data.total || offset + items.length,
       hasMore: Array.isArray(data) ? false : Boolean(data.has_more)
     });
-  };
+  }, []);
 
   const openCategory = async (category) => {
     setActiveCategory(category);
@@ -821,7 +804,7 @@ function App() {
     }
   };
 
-  const loadMoreCategoryFiles = async () => {
+  const loadMoreCategoryFiles = useCallback(async () => {
     if (!activeCategory || loadingCategory || loadingMoreCategory || !categoryPagination.hasMore) return;
     setLoadingMoreCategory(true);
     try {
@@ -831,7 +814,22 @@ function App() {
     } finally {
       setLoadingMoreCategory(false);
     }
-  };
+  }, [activeCategory, categoryFiles.length, categoryPagination.hasMore, fetchCategoryPage, loadingCategory, loadingMoreCategory]);
+
+  useEffect(() => {
+    if (currentView !== 'categoryGallery' || loadingCategory || loadingMoreCategory || !categoryPagination.hasMore) return;
+    const sentinel = categoryLoadMoreRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        loadMoreCategoryFiles();
+      }
+    }, { rootMargin: '700px 0px' });
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [categoryPagination.hasMore, currentView, loadMoreCategoryFiles, loadingCategory, loadingMoreCategory]);
 
   const openItemMenu = (e, item) => {
     e.preventDefault();
@@ -1288,21 +1286,6 @@ function App() {
 ${url}`);
   };
 
-  const operateOnSelected = async (mode) => {
-    if (!operationTarget.trim() || selectedPaths.length === 0) return alert('Select items and enter a target folder');
-    for (const path of selectedPaths) {
-      await fetch(`/api/files/${mode}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_path: path, target_dir: operationTarget.trim() })
-      });
-    }
-    setSelectedPaths([]);
-    setOperationTarget('');
-    openFolder(currentPath);
-    fetchStats();
-  };
-
   const getParentPath = (path) => {
     const parts = path.split('/').filter(Boolean);
     if (parts.length <= 1) return path;
@@ -1323,29 +1306,27 @@ ${url}`);
   const hasPreviousPreviewImage = previewImageIndex > 0;
   const hasNextPreviewImage = previewImageIndex >= 0 && previewImageIndex < imagePreviewItems.length - 1;
 
-  const openAdjacentPreviewImage = (direction) => {
+  const navigatePreviewImage = useCallback((direction) => {
     const targetIndex = previewImageIndex + direction;
     if (targetIndex < 0 || targetIndex >= imagePreviewItems.length) return;
-    openPreview(imagePreviewItems[targetIndex]);
-  };
+    setImageEditMode(false);
+    setImageTransform({ rotate: 0, flipX: false, zoom: 1 });
+    setSavingEditedImage(false);
+    setPreviewItem(imagePreviewItems[targetIndex]);
+  }, [imagePreviewItems, previewImageIndex]);
 
   useEffect(() => {
     if (previewItem?.type !== 'Image' || imageEditMode) return undefined;
 
     const handlePreviewKeyDown = (event) => {
-      if (event.key === 'ArrowLeft') {
-        event.preventDefault();
-        openAdjacentPreviewImage(-1);
-      }
-      if (event.key === 'ArrowRight') {
-        event.preventDefault();
-        openAdjacentPreviewImage(1);
-      }
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      navigatePreviewImage(event.key === 'ArrowLeft' ? -1 : 1);
     };
 
     window.addEventListener('keydown', handlePreviewKeyDown);
     return () => window.removeEventListener('keydown', handlePreviewKeyDown);
-  }, [previewItem, imageEditMode, imagePreviewItems]);
+  }, [imageEditMode, navigatePreviewImage, previewItem]);
 
   const formatSize = (bytes) => {
     if (!bytes) return '0 B';
@@ -1373,7 +1354,7 @@ ${url}`);
     return getModifiedDate(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
-  const formatTimelineLabel = (date, mode = categoryTimelineMode) => {
+  const formatTimelineLabel = useCallback((date, mode = categoryTimelineMode) => {
     if (!date || date.getTime() === 0) return mode === 'month' ? 'Unknown month' : 'Unknown date';
     if (mode === 'month') {
       return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
@@ -1385,16 +1366,16 @@ ${url}`);
     if (dayDiff === 0) return 'Today';
     if (dayDiff === 1) return 'Yesterday';
     return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
-  };
+  }, [categoryTimelineMode]);
 
-  const getTimelineGroupKey = (date) => {
+  const getTimelineGroupKey = useCallback((date) => {
     if (!date || date.getTime() === 0) return `${categoryTimelineMode}-unknown`;
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     if (categoryTimelineMode === 'month') return `month-${year}-${month}`;
     const day = String(date.getDate()).padStart(2, '0');
     return `date-${year}-${month}-${day}`;
-  };
+  }, [categoryTimelineMode]);
 
   const toggleTimelineGroup = (groupKey) => {
     setCollapsedTimelineGroups(prev => {
@@ -1422,7 +1403,7 @@ ${url}`);
         groups.get(groupKey).items.push(item);
       });
     return Array.from(groups.values());
-  }, [categoryFiles, categoryTimelineMode]);
+  }, [categoryFiles, formatTimelineLabel, getTimelineGroupKey]);
 
 
   const scrubToTimelineGroup = (index) => {
@@ -2930,7 +2911,7 @@ ${url}`);
                     <button
                       type="button"
                       className="preview-image-nav previous"
-                      onClick={() => openAdjacentPreviewImage(-1)}
+                      onClick={() => navigatePreviewImage(-1)}
                       disabled={!hasPreviousPreviewImage}
                       title="Previous image"
                     >
@@ -2940,7 +2921,7 @@ ${url}`);
                     <button
                       type="button"
                       className="preview-image-nav next"
-                      onClick={() => openAdjacentPreviewImage(1)}
+                      onClick={() => navigatePreviewImage(1)}
                       disabled={!hasNextPreviewImage}
                       title="Next image"
                     >

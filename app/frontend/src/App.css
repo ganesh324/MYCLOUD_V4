@@ -4264,8 +4264,7 @@
   margin: -10px 0 12px;
 }
 
-.fm-control-strip select,
-.batch-target-input {
+.fm-control-strip select {
   border: 1px solid var(--border-color);
   background: #fff;
   color: var(--text-main);
@@ -4303,9 +4302,6 @@
   background: var(--accent-soft);
 }
 
-.batch-target-input {
-  width: 190px;
-}
 
 .tools-modal {
   width: min(760px, calc(100vw - 32px)) !important;
@@ -4426,9 +4422,6 @@
     grid-template-columns: 1fr;
   }
 
-  .batch-target-input {
-    width: 150px;
-  }
 }
 
 .trash-list {
@@ -4624,8 +4617,7 @@
 }
 
 .fm-command-actions select,
-.fm-command-btn,
-.fm-command-actions .batch-target-input {
+.fm-command-btn {
   height: 34px;
   border: 1px solid var(--border-color);
   border-radius: 11px;
@@ -4677,10 +4669,6 @@
   padding-bottom: 1px;
 }
 
-.fm-command-actions .batch-target-input {
-  width: 180px;
-  padding: 0 10px;
-}
 
 .fm-command-band .view-mode-toggle {
   flex-shrink: 0;
@@ -4740,10 +4728,6 @@
     font-size: 0.72rem;
   }
 
-  .fm-command-actions .batch-target-input {
-    width: 160px;
-    flex: 0 0 160px;
-  }
 
   .fm-command-band .view-mode-toggle {
     width: 100%;
@@ -7299,8 +7283,7 @@ body,
     overflow: visible !important;
   }
 
-  .fm-control-strip select,
-  .batch-target-input {
+  .fm-control-strip select {
     width: 100% !important;
     min-width: 0 !important;
     height: 38px !important;

@@ -10,12 +10,7 @@ import powerpointFileIconUrl from '../assets/file-icons/powerpoint.svg';
 import databaseFileIconUrl from '../assets/file-icons/database.svg';
 import archiveFileIconUrl from '../assets/file-icons/zip.svg';
 import genericFileIconUrl from '../assets/file-icons/file.svg';
-
-export const getFileExtension = (item = {}) => {
-  const source = item.name || item.path || '';
-  const dotIndex = source.lastIndexOf('.');
-  return dotIndex >= 0 ? source.slice(dotIndex + 1).toLowerCase() : '';
-};
+import { getFileExtension } from '../utils/fileTypes';
 
 const isArchiveItem = (item = {}) => {
   const ext = getFileExtension(item);
@@ -42,11 +37,6 @@ const isDocumentItem = (item = {}) => {
   return item.type === 'Text' || ['doc', 'docx', 'rtf', 'odt', 'pages'].includes(ext);
 };
 
-export const isFullPreviewImageItem = (item = {}) => {
-  if (item.type !== 'Image') return false;
-  const ext = getFileExtension(item);
-  return !['ico', 'icns', 'svg'].includes(ext);
-};
 
 const PackFileIcon = ({ src, size = 24, className = '', style }) => (
   <img
