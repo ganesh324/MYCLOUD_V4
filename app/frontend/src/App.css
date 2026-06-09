@@ -1859,159 +1859,70 @@
   font-weight: bold;
 }
 
-/* Floating Batch Action Tray */
-.batch-tray-container {
-  position: fixed;
-  top: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  pointer-events: none;
-}
-
-.batch-tray {
-  pointer-events: auto;
-  display: flex;
+/* Inline Selection Actions */
+.selection-actions-inline {
+  display: inline-flex;
   align-items: center;
-  gap: 20px;
-  padding: 12px 24px;
-  border-radius: 20px;
-  background: rgba(15, 23, 42, 0.85) !important;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
-  color: white;
-}
-
-.batch-count {
-  font-weight: 700;
-  font-size: 0.9rem;
-  letter-spacing: 0.2px;
-}
-
-.batch-actions-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.btn-batch {
-  display: flex;
-  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  padding: 8px 16px;
-  border-radius: 12px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s;
+  min-width: 0;
+  max-width: 100%;
 }
 
-.btn-batch.primary {
-  background: var(--primary);
-  color: white;
-}
-
-.btn-batch.primary:hover {
-  background: var(--primary-hover);
-}
-
-.btn-batch.secondary {
-  background: rgba(255, 255, 255, 0.15);
-  color: white;
-}
-
-.btn-batch.secondary:hover {
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.btn-batch.danger {
-  background: #ef4444;
-  color: white;
-}
-
-.btn-batch.danger:hover {
-  background: #dc2626;
-}
-
-.btn-batch.icon-only {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.12);
-  color: white;
-}
-
-.btn-batch.icon-only:hover {
-  background: rgba(255, 255, 255, 0.22);
-}
-
-.batch-divider {
-  width: 1px;
-  height: 24px;
-  background: rgba(255, 255, 255, 0.15);
-  margin: 0 4px;
-}
-
-.batch-tray .close-btn {
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
-  border-radius: 10px;
-  width: 32px;
-  height: 32px;
-  display: flex;
+.selection-count {
+  min-height: 34px;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  border: none;
+  padding: 0 10px;
+  border: 1px solid rgba(58, 123, 213, 0.22);
+  border-radius: 11px;
+  background: var(--accent-soft);
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 850;
+  white-space: nowrap;
 }
 
-.batch-tray .close-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+.fm-command-btn.selection-action {
+  flex-shrink: 0;
 }
 
+.fm-command-btn.selection-action.icon-only {
+  width: 34px;
+  padding: 0;
+}
+
+.category-header-actions .selection-actions-inline {
+  flex-wrap: wrap;
+}
+
+.fm-command-actions.selection-actions {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+
+.fm-command-actions.selection-actions .selection-actions-inline {
+  width: 100%;
+}
 
 @media (max-width: 768px) {
-  .batch-tray-container {
-    top: 12px;
-    left: 12px;
-    right: 12px;
-    transform: none;
+  .selection-actions-inline {
+    width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
   }
 
-  .batch-tray {
-    align-items: stretch;
-    gap: 10px;
-    padding: 12px;
-    border-radius: 14px;
-    flex-direction: column;
+  .selection-count,
+  .fm-command-btn.selection-action {
+    min-width: max-content;
   }
 
-  .batch-actions-row {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .btn-batch {
-    justify-content: center;
-    padding: 8px 6px;
-    min-width: 0;
-    font-size: 0.72rem;
-  }
-
-  .btn-batch span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .batch-divider {
-    display: none;
+  .fm-command-actions.selection-actions {
+    display: flex;
+    overflow-x: auto;
   }
 }
 

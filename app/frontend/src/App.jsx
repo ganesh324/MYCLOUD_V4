@@ -1516,6 +1516,39 @@ ${url}`);
     ? new Date(dashboardHealth.index.database_modified * 1000).toLocaleString()
     : 'Unknown';
 
+
+  const renderSelectionActions = () => (
+    <div className="selection-actions-inline" role="region" aria-label="Selected item actions">
+      <span className="selection-count">{selectedPaths.length} selected</span>
+      <button className="fm-command-btn selection-action" type="button" onClick={toggleSelectAll} disabled={selectionScopeItems.length === 0}>
+        <CheckSquare size={16} />
+        <span>{allVisibleSelected ? "Deselect All" : "Select All"}</span>
+      </button>
+      <button className="fm-command-btn selection-action" type="button" onClick={handleBulkDownload}>
+        <Download size={16} />
+        <span>Download</span>
+      </button>
+      <button className="fm-command-btn selection-action" type="button" onClick={handleBulkFavorite}>
+        <Star size={16} />
+        <span>Favorite</span>
+      </button>
+      <button className="fm-command-btn selection-action" type="button" onClick={() => beginClipboardOperation("cut", null)}>
+        <Scissors size={16} />
+        <span>Cut</span>
+      </button>
+      <button className="fm-command-btn selection-action" type="button" onClick={() => beginClipboardOperation("copy", null)}>
+        <Copy size={16} />
+        <span>Copy</span>
+      </button>
+      <button className="fm-command-btn selection-action danger" type="button" onClick={handleBulkDelete}>
+        <Trash2 size={16} />
+        <span>Delete</span>
+      </button>
+      <button className="fm-command-btn selection-action icon-only" type="button" onClick={() => setSelectedPaths([])} title="Clear selection" aria-label="Clear selection">
+        <X size={16} />
+      </button>
+    </div>
+  );
   return (
     <div className={`dashboard ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileMenuOpen ? 'mobile-sidebar-open' : ''}`} onClick={() => contextMenu && closeContextMenu()}>
       {/* Mobile Backdrop */}
@@ -1871,20 +1904,24 @@ ${url}`);
                 <h2 className="gallery-title" style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-main)' }}>{activeCategory} Library</h2>
                 <span className="gallery-count" style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>{loadingCategory ? 'Loading...' : `${categoryFiles.length}${categoryPagination.total > categoryFiles.length ? ` of ${categoryPagination.total}` : ''} items`}</span>
                 <div className="category-header-actions">
-                  <button
-                    type="button"
-                    className={`category-select-btn ${someVisibleSelected || allVisibleSelected ? "active" : ""}`}
-                    onClick={toggleSelectAll}
-                    disabled={categoryFiles.length === 0}
-                    aria-label={allVisibleSelected ? "Deselect all loaded category items" : "Select all loaded category items"}
-                  >
-                    <CheckSquare size={15} />
-                    <span>{allVisibleSelected ? "Deselect" : selectedVisibleCount > 0 ? `${selectedVisibleCount} selected` : "Select"}</span>
-                  </button>
-                  <div className="category-timeline-mode" aria-label="Timeline grouping">
-                    <button type="button" className={categoryTimelineMode === 'date' ? 'active' : ''} onClick={() => { setCategoryTimelineMode('date'); setCollapsedTimelineGroups(new Set()); }}>Day</button>
-                    <button type="button" className={categoryTimelineMode === 'month' ? 'active' : ''} onClick={() => { setCategoryTimelineMode('month'); setCollapsedTimelineGroups(new Set()); }}>Month</button>
-                  </div>
+                  {selectedPaths.length > 0 ? renderSelectionActions() : (
+                    <>
+                      <button
+                        type="button"
+                        className={"category-select-btn " + (someVisibleSelected || allVisibleSelected ? "active" : "")}
+                        onClick={toggleSelectAll}
+                        disabled={categoryFiles.length === 0}
+                        aria-label={allVisibleSelected ? "Deselect all loaded category items" : "Select all loaded category items"}
+                      >
+                        <CheckSquare size={15} />
+                        <span>{allVisibleSelected ? "Deselect" : selectedVisibleCount > 0 ? selectedVisibleCount + " selected" : "Select"}</span>
+                      </button>
+                      <div className="category-timeline-mode" aria-label="Timeline grouping">
+                        <button type="button" className={categoryTimelineMode === "date" ? "active" : ""} onClick={() => { setCategoryTimelineMode("date"); setCollapsedTimelineGroups(new Set()); }}>Day</button>
+                        <button type="button" className={categoryTimelineMode === "month" ? "active" : ""} onClick={() => { setCategoryTimelineMode("month"); setCollapsedTimelineGroups(new Set()); }}>Month</button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -2398,39 +2435,43 @@ ${url}`);
                 </div>
               </div>
 
-              <div className="fm-command-actions">
-                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                    <option value="name">Sort: Name</option>
-                    <option value="modified">Sort: Modified</option>
-                    <option value="size">Sort: Size</option>
-                    <option value="type">Sort: Type</option>
-                  </select>
-                  <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-                    <option value="All">All types</option>
-                    <option value="Folder">Folders</option>
-                    <option value="Image">Images</option>
-                    <option value="Video">Videos</option>
-                    <option value="Music">Music</option>
-                    <option value="PDF">PDFs</option>
-                    <option value="Text">Text</option>
-                    <option value="File">Files</option>
-                  </select>
-                  <button className="fm-command-btn" onClick={() => setActiveModal('newFolder')} title="New Folder">
-                    <Folder size={16} />
-                    <span>Folder</span>
-                  </button>
-                  <button className="fm-command-btn" onClick={openFilePicker} title="Upload files">
-                    <CloudUpload size={16} />
-                    <span>Upload</span>
-                  </button>
-                  <div className="view-mode-toggle desktop-only-view-toggle">
-                    <button className={`btn-icon ${effectiveViewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')} title="Grid view">
-                      <LayoutGrid size={18} />
-                    </button>
-                    <button className={`btn-icon ${effectiveViewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')} title="List view">
-                      <List size={18} />
-                    </button>
-                  </div>
+              <div className={"fm-command-actions " + (selectedPaths.length > 0 ? "selection-actions" : "")}>
+                  {selectedPaths.length > 0 ? renderSelectionActions() : (
+                    <>
+                      <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                        <option value="name">Sort: Name</option>
+                        <option value="modified">Sort: Modified</option>
+                        <option value="size">Sort: Size</option>
+                        <option value="type">Sort: Type</option>
+                      </select>
+                      <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+                        <option value="All">All types</option>
+                        <option value="Folder">Folders</option>
+                        <option value="Image">Images</option>
+                        <option value="Video">Videos</option>
+                        <option value="Music">Music</option>
+                        <option value="PDF">PDFs</option>
+                        <option value="Text">Text</option>
+                        <option value="File">Files</option>
+                      </select>
+                      <button className="fm-command-btn" onClick={() => setActiveModal("newFolder")} title="New Folder">
+                        <Folder size={16} />
+                        <span>Folder</span>
+                      </button>
+                      <button className="fm-command-btn" onClick={openFilePicker} title="Upload files">
+                        <CloudUpload size={16} />
+                        <span>Upload</span>
+                      </button>
+                      <div className="view-mode-toggle desktop-only-view-toggle">
+                        <button className={"btn-icon " + (effectiveViewMode === "grid" ? "active" : "")} onClick={() => setViewMode("grid")} title="Grid view">
+                          <LayoutGrid size={18} />
+                        </button>
+                        <button className={"btn-icon " + (effectiveViewMode === "list" ? "active" : "")} onClick={() => setViewMode("list")} title="List view">
+                          <List size={18} />
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
             </div>
             
@@ -2597,43 +2638,6 @@ ${url}`);
 
       </main>
 
-      {selectedPaths.length > 0 && (currentView === 'fileManager' || currentView === 'categoryGallery') && (
-        <div className="batch-tray-container" role="region" aria-label="Selected item actions">
-          <div className="batch-tray glass animate-slide-up">
-            <span className="batch-count">{selectedPaths.length} selected</span>
-            <div className="batch-actions-row">
-              <button className="btn-batch secondary" type="button" onClick={toggleSelectAll} disabled={selectionScopeItems.length === 0}>
-                <CheckSquare size={16} />
-                <span>{allVisibleSelected ? 'Deselect All' : 'Select All'}</span>
-              </button>
-              <button className="btn-batch secondary" type="button" onClick={handleBulkDownload}>
-                <Download size={16} />
-                <span>Download</span>
-              </button>
-              <button className="btn-batch secondary" type="button" onClick={handleBulkFavorite}>
-                <Star size={16} />
-                <span>Favorite</span>
-              </button>
-              <button className="btn-batch secondary" type="button" onClick={() => beginClipboardOperation('cut', null)}>
-                <Scissors size={16} />
-                <span>Cut</span>
-              </button>
-              <button className="btn-batch secondary" type="button" onClick={() => beginClipboardOperation('copy', null)}>
-                <Copy size={16} />
-                <span>Copy</span>
-              </button>
-              <span className="batch-divider" />
-              <button className="btn-batch danger" type="button" onClick={handleBulkDelete}>
-                <Trash2 size={16} />
-                <span>Delete</span>
-              </button>
-              <button className="btn-batch icon-only" type="button" onClick={() => setSelectedPaths([])} title="Clear selection" aria-label="Clear selection">
-                <X size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {contextMenu && (
         <div
