@@ -31,6 +31,9 @@ The compose stack runs:
 - `frontend`: Nginx serving the built React app and proxying `/api` to the backend.
 - `backend`: FastAPI on `${MYCLOUD_BACKEND_PORT:-8000}` inside the Docker network.
 
+
+Private user folders are created under `${MYCLOUD_STORAGE_ROOT}/${MYCLOUD_USER_FOLDERS_DIR_NAME:-Users}`. Each user sees their own folder in Favorites as `My Files`; admins can see every user's folder.
+
 Mounted paths:
 
 - `./app/data` -> `/app/data` for SQLite data, thumbnails, and local environment values.

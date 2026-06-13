@@ -24,6 +24,38 @@ services:
       retries: 3
       start_period: 30s
 
+  thumbnailer:
+    build:
+      context: ./app/backend
+    container_name: mycloud-thumbnailer
+    restart: unless-stopped
+    env_file:
+      - ./app/data/mycloud.env
+    environment:
+      MYCLOUD_STORAGE_ROOT: ${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}
+      MYCLOUD_THUMBNAIL_SCAN_INTERVAL: ${MYCLOUD_THUMBNAIL_SCAN_INTERVAL:-120}
+    volumes:
+      - ./app/data:/app/data
+      - ./scripts:/app/scripts
+      - ${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}:${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}
+    command: ["python", "/app/scripts/generate_video_thumbnails.py", "--watch"]
+
+  video-previewer:
+    build:
+      context: ./app/backend
+    container_name: mycloud-video-previewer
+    restart: unless-stopped
+    env_file:
+      - ./app/data/mycloud.env
+    environment:
+      MYCLOUD_STORAGE_ROOT: ${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}
+      MYCLOUD_VIDEO_PREVIEW_SCAN_INTERVAL: ${MYCLOUD_VIDEO_PREVIEW_SCAN_INTERVAL:-300}
+    volumes:
+      - ./app/data:/app/data
+      - ./scripts:/app/scripts
+      - ${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}:${MYCLOUD_STORAGE_ROOT:-/mnt/Drive1}
+    command: ["python", "/app/scripts/generate_video_previews.py", "--watch"]
+
   frontend:
     build:
       context: ./app/frontend

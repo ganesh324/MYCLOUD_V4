@@ -5,6 +5,7 @@ export const getFileExtension = (item = {}) => {
 };
 
 export const isFullPreviewImageItem = (item = {}) => {
+  if (item.type === 'Video') return true;
   if (item.type !== 'Image') return false;
   const ext = getFileExtension(item);
   return !['ico', 'icns', 'svg'].includes(ext);

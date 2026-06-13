@@ -1711,7 +1711,7 @@ ${url}`);
               </td>
               <td>
                 <div className="fm-list-name-cell">
-                  {item.type === "Image" ? (
+                  {isFullPreviewImageItem(item) ? (
                     <div className="fm-list-thumbnail-container">
                       <img src={authUrl("/api/thumbnail", item.path)} alt={item.name} className="fm-list-thumbnail" loading="lazy" />
                     </div>
@@ -2392,7 +2392,7 @@ ${url}`);
                       >
                         <td>
                           <div className="name-cell" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            {item.type === 'Image' ? (
+                            {isFullPreviewImageItem(item) ? (
                               <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="recent-list-thumbnail" loading="lazy" />
                             ) : (
                               <ItemTypeIcon item={item} size={18} style={{ flexShrink: 0 }} />
@@ -2443,8 +2443,8 @@ ${url}`);
                     <button className="recent-card-menu-btn" onClick={(e) => openItemMenu(e, item)} title="More options">
                       <MoreVertical size={16} />
                     </button>
-                    <div className={`recent-card-icon-wrapper ${item.type === 'Image' ? 'has-thumbnail' : ''}`}>
-                      {item.type === 'Image' ? (
+                    <div className={`recent-card-icon-wrapper ${isFullPreviewImageItem(item) ? 'has-thumbnail' : ''}`}>
+                      {isFullPreviewImageItem(item) ? (
                         <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="recent-card-thumbnail" loading="lazy" />
                       ) : (
                         <ItemTypeIcon item={item} size={30} />
@@ -2858,7 +2858,7 @@ ${url}`);
                             </td>
                             <td>
                               <div className="fm-list-name-cell">
-                                {item.type === 'Image' ? (
+                                {isFullPreviewImageItem(item) ? (
                                   <div className="fm-list-thumbnail-container">
                                     <img src={authUrl('/api/thumbnail', item.path)} alt={item.name} className="fm-list-thumbnail" loading="lazy" />
                                   </div>
@@ -3213,7 +3213,7 @@ ${url}`);
                 </div>
               ) : previewItem.type === 'Video' ? (
                 <div className="preview-media-container">
-                  <video src={authUrl('/api/files/raw', previewItem.path)} controls className="preview-video" autoPlay />
+                  <video src={authUrl('/api/files/preview', previewItem.path)} controls className="preview-video" autoPlay />
                 </div>
               ) : previewItem.type === 'Music' ? (
                 <div className="preview-media-container music">

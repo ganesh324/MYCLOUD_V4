@@ -47,6 +47,7 @@ STORAGE_LABEL = os.environ.get("MYCLOUD_STORAGE_LABEL", os.path.basename(STORAGE
 SECRET_KEY = os.environ.get("MYCLOUD_SECRET_KEY", "mycloud_dev_secret_change_me")
 DEFAULT_FAVORITE_PATH = os.environ.get("MYCLOUD_DEFAULT_FAVORITE_PATH", STORAGE_ROOT)
 DEFAULT_FAVORITE_LABEL = os.environ.get("MYCLOUD_DEFAULT_FAVORITE_LABEL", STORAGE_LABEL)
+USER_FOLDERS_DIR_NAME = os.environ.get("MYCLOUD_USER_FOLDERS_DIR_NAME", "Users")
 CORS_ORIGINS = [origin.strip() for origin in os.environ.get("MYCLOUD_CORS_ORIGINS", "*").split(",") if origin.strip()]
 BACKEND_HOST = os.environ.get("MYCLOUD_BACKEND_HOST", "0.0.0.0")
 BACKEND_PORT = int(os.environ.get("MYCLOUD_BACKEND_PORT", "8000"))
@@ -149,6 +150,73 @@ def resolve_storage_path(path: str) -> str:
         raise HTTPException(status_code=403, detail="Access denied")
     return resolved
 
+
+def is_admin_user(user: dict) -> bool:
+    return user.get("role") == "admin"
+
+
+def safe_user_folder_name(username: str) -> str:
+    base = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in (username or "").strip())
+    base = base.strip("._-") or "user"
+    suffix = hashlib.sha256((username or "").encode("utf-8")).hexdigest()[:8]
+    return f"{base}-{suffix}"
+
+
+def get_user_folders_root() -> str:
+    return resolve_storage_path(os.path.join(STORAGE_ROOT, USER_FOLDERS_DIR_NAME))
+
+
+def get_user_folder_path(username: str) -> str:
+    return resolve_storage_path(os.path.join(get_user_folders_root(), safe_user_folder_name(username)))
+
+
+def is_path_within(root: str, path: str) -> bool:
+    root = os.path.realpath(root)
+    path = os.path.realpath(path)
+    try:
+        return os.path.commonpath([root, path]) == root
+    except ValueError:
+        return False
+
+
+def is_private_user_area_path(path: str) -> bool:
+    return is_path_within(get_user_folders_root(), path)
+
+
+def user_can_access_path(user: dict, path: str) -> bool:
+    if is_admin_user(user):
+        return True
+    if not is_private_user_area_path(path):
+        return True
+    own_folder = get_user_folder_path(user["username"])
+    return is_path_within(own_folder, path)
+
+
+def require_path_access(user: dict, path: str):
+    if not user_can_access_path(user, path):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
+def path_contains_unowned_private_area(user: dict, path: str) -> bool:
+    if is_admin_user(user):
+        return False
+    user_folders_root = get_user_folders_root()
+    own_folder = get_user_folder_path(user["username"])
+    return is_path_within(path, user_folders_root) and not is_path_within(own_folder, path)
+
+
+def require_no_unowned_private_descendants(user: dict, path: str):
+    if path_contains_unowned_private_area(user, path):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
+def filter_visible_paths(user: dict, paths: list[str]) -> list[str]:
+    return [path for path in paths if user_can_access_path(user, path)]
+
+
+def filter_visible_rows(user: dict, rows, path_key: str = "filepath"):
+    return [row for row in rows if user_can_access_path(user, row[path_key])]
+
 def safe_child_path(parent: str, name: str) -> str:
     if not name or os.path.basename(name) != name or "/" in name or "\\" in name:
         raise HTTPException(status_code=400, detail="Invalid file or folder name")
@@ -205,6 +273,61 @@ def read_tail_lines(path: str, limit: int = 80) -> list[str]:
         return [line.rstrip("\n") for line in lines[-limit:]]
     except OSError:
         return []
+
+
+def get_thumbnail_cache_path(path: str, profile: str) -> str:
+    stat = os.stat(path)
+    cache_key = f"{path}:{stat.st_size}:{stat.st_mtime_ns}:{profile}"
+    path_hash = hashlib.md5(cache_key.encode("utf-8")).hexdigest()
+    thumbnails_dir = os.path.join(os.path.dirname(__file__), "..", "data", "thumbnails")
+    return os.path.join(thumbnails_dir, f"{path_hash}.jpg")
+
+
+def get_video_preview_cache_path(path: str) -> str:
+    stat = os.stat(path)
+    cache_key = f"{path}:{stat.st_size}:{stat.st_mtime_ns}:{VIDEO_PREVIEW_PROFILE}"
+    path_hash = hashlib.md5(cache_key.encode("utf-8")).hexdigest()
+    previews_dir = os.path.join(os.path.dirname(__file__), "..", "data", "video_previews")
+    return os.path.join(previews_dir, f"{path_hash}.mp4")
+
+
+def generate_video_thumbnail(path: str, thumb_path: str):
+    os.makedirs(os.path.dirname(thumb_path), exist_ok=True)
+    tmp_path = f"{thumb_path}.tmp"
+    last_error = RuntimeError("ffmpeg did not produce a frame")
+    for timestamp in ("00:00:03", "00:00:01", "00:00:00.1"):
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            timestamp,
+            "-i",
+            path,
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=384:384:force_original_aspect_ratio=increase,crop=384:384,format=yuvj420p",
+            "-q:v",
+            "3",
+            "-threads",
+            "1",
+            tmp_path,
+        ]
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=60)
+            if os.path.exists(tmp_path):
+                os.replace(tmp_path, thumb_path)
+                return
+        except Exception as exc:
+            last_error = exc
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+    raise last_error
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -293,19 +416,7 @@ async def lifespan(app: FastAPI):
             )
         ''')
 
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS file_permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                path TEXT NOT NULL,
-                username TEXT NOT NULL,
-                permission TEXT NOT NULL DEFAULT 'full',
-                granted_by TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                UNIQUE(path, username)
-            )
-        ''')
-        await db.execute('CREATE INDEX IF NOT EXISTS idx_file_permissions_username ON file_permissions(username)')
-        await db.execute('CREATE INDEX IF NOT EXISTS idx_file_permissions_path ON file_permissions(path)')
+        await db.execute('DROP TABLE IF EXISTS file_permissions')
 
         await db.execute('''
             CREATE TABLE IF NOT EXISTS tags (
@@ -367,13 +478,11 @@ async def lifespan(app: FastAPI):
             INSERT OR IGNORE INTO favorites (path, type, name) 
             VALUES (?, 'Folder', ?)
         ''', (DEFAULT_FAVORITE_PATH, DEFAULT_FAVORITE_LABEL))
-        await db.execute('''
-            INSERT OR IGNORE INTO file_permissions (path, username, permission, granted_by, created_at)
-            SELECT f.filepath, u.username, 'full', 'system_migration', ?
-            FROM files f
-            CROSS JOIN users u
-            WHERE u.role != 'admin'
-        ''', (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),))
+        os.makedirs(get_user_folders_root(), exist_ok=True)
+        db.row_factory = sqlite3.Row
+        user_rows = await (await db.execute('SELECT username, display_name FROM users')).fetchall()
+        for user_row in user_rows:
+            await ensure_user_folder_record(db, user_row["username"], user_row["display_name"])
         await db.commit()
     yield
 
@@ -409,6 +518,10 @@ VIDEO_EXTENSIONS = {"3gp", "avi", "mkv", "mov", "mp4", "mts", "mxf", "vob", "wmv
 MUSIC_EXTENSIONS = {"mp3", "wav", "flac", "ogg", "aac"}
 PDF_EXTENSIONS = {"pdf"}
 TEXT_EXTENSIONS = {"txt", "md", "js", "jsx", "ts", "tsx", "json", "css", "html", "py", "sh", "yml", "yaml", "ini", "conf", "log"}
+IMAGE_THUMB_PROFILE = "sq384-q88-v2"
+VIDEO_THUMB_PROFILE = "video-sq384-q88-v1"
+VIDEO_PREVIEW_PROFILE = "mp4-preview-h264-aac-v1"
+VIDEO_PREVIEW_EXTENSIONS = {"mts"}
 
 class FavoriteToggleRequest(BaseModel):
     path: str
@@ -593,6 +706,19 @@ async def log_activity(action: str, path: str | None, actor: str, details: str |
         )
         await db.commit()
 
+
+async def ensure_user_folder_record(db, username: str, display_name: str | None = None) -> dict:
+    user_folder = get_user_folder_path(username)
+    os.makedirs(user_folder, exist_ok=True)
+    stat_info = os.stat(user_folder)
+    mod_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    await db.execute('''
+        INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
+        VALUES (?, ?, 'directory', 0, ?)
+    ''', (os.path.basename(user_folder), user_folder, mod_time))
+    label = "My Files" if display_name is None else f"{display_name or username} Files"
+    return {"path": user_folder, "type": "Folder", "name": label, "tags": []}
+
 @app.post("/api/auth/login")
 async def login(req: LoginRequest, request: Request):
     first_login_verified = False
@@ -654,36 +780,25 @@ async def get_stats(user: dict = Depends(get_current_user)):
     
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
-        
-        # Get count by extension
-        cursor = await db.execute("SELECT extension, COUNT(*) as count, SUM(size_bytes) as size FROM files GROUP BY extension")
-        rows = await cursor.fetchall()
-        
+        cursor = await db.execute("SELECT filepath, extension, size_bytes FROM files")
+        rows = filter_visible_rows(user, await cursor.fetchall())
+
         for row in rows:
-            ext = row["extension"]
-            ext = ext.lower() if ext else ""
-            count = row["count"]
-            size = row["size"] or 0
-            
+            ext = (row["extension"] or "").lower()
             if ext == "directory":
+                stats["folders"] += 1
                 continue
-                
+
+            size = row["size_bytes"] or 0
             stats["total_size"] += size
-            
             if ext in IMAGE_EXTENSIONS:
-                stats["images"] += count
+                stats["images"] += 1
             elif ext in VIDEO_EXTENSIONS:
-                stats["videos"] += count
+                stats["videos"] += 1
             elif ext in MUSIC_EXTENSIONS:
-                stats["music"] += count
+                stats["music"] += 1
             else:
-                stats["files"] += count
-                
-        # Count unique folders
-        cursor = await db.execute("SELECT COUNT(*) as folder_count FROM files WHERE extension = 'directory'")
-        folder_row = await cursor.fetchone()
-        if folder_row:
-            stats["folders"] = folder_row["folder_count"]
+                stats["files"] += 1
 
     return stats
 
@@ -707,6 +822,7 @@ async def upsert_tag(req: TagUpsertRequest, user: dict = Depends(get_current_use
 @app.put("/api/files/tags")
 async def set_file_tags(req: FileTagsSetRequest, user: dict = Depends(get_current_user)):
     path = resolve_storage_path(req.path)
+    require_path_access(user, path)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File or folder not found")
     names = []
@@ -719,6 +835,7 @@ async def set_file_tags(req: FileTagsSetRequest, user: dict = Depends(get_curren
     target_paths = [path]
     if req.apply_to_contents and os.path.isdir(path):
         for root, dirs, files in os.walk(path):
+            dirs[:] = [dirname for dirname in dirs if user_can_access_path(user, os.path.join(root, dirname))]
             for dirname in dirs:
                 target_paths.append(os.path.join(root, dirname))
             for filename in files:
@@ -742,13 +859,22 @@ async def get_favorites(user: dict = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
         cursor = await db.execute('SELECT path, type, name FROM favorites')
-        rows = await cursor.fetchall()
+        rows = filter_visible_rows(user, await cursor.fetchall(), "path")
         tags_by_path = await get_tags_for_paths(db, [row["path"] for row in rows])
         favorites = [{"path": row["path"], "type": row["type"], "name": row["name"], "tags": tags_by_path.get(row["path"], [])} for row in rows]
+        if is_admin_user(user):
+            user_rows = await (await db.execute('SELECT username, display_name FROM users ORDER BY lower(username)')).fetchall()
+            for user_row in user_rows:
+                favorites.append(await ensure_user_folder_record(db, user_row["username"], user_row["display_name"]))
+        else:
+            favorites.append(await ensure_user_folder_record(db, user["username"]))
+        await db.commit()
     return {"favorites": favorites}
 
 @app.post("/api/favorites/toggle")
 async def toggle_favorite(req: FavoriteToggleRequest, user: dict = Depends(get_current_user)):
+    req.path = resolve_storage_path(req.path)
+    require_path_access(user, req.path)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
         cursor = await db.execute('SELECT path FROM favorites WHERE path = ?', (req.path,))
@@ -777,9 +903,9 @@ async def get_recent_activity(user: dict = Depends(get_current_user)):
             LEFT JOIN favorites fav ON f.filepath = fav.path
             WHERE f.extension != 'directory'
             ORDER BY f.modified_time DESC 
-            LIMIT 5
+            LIMIT 100
         ''')
-        rows = await cursor.fetchall()
+        rows = filter_visible_rows(user, await cursor.fetchall())[:5]
         tags_by_path = await get_tags_for_paths(db, [row["filepath"] for row in rows])
         
         recent = []
@@ -799,6 +925,7 @@ async def get_recent_activity(user: dict = Depends(get_current_user)):
 @app.get("/api/files/list")
 async def get_files_list(path: str = STORAGE_ROOT, user: dict = Depends(get_current_user)):
     path = resolve_storage_path(path)
+    require_path_access(user, path)
     
     if not os.path.exists(path) or not os.path.isdir(path):
         raise HTTPException(status_code=404, detail="Directory not found")
@@ -807,8 +934,13 @@ async def get_files_list(path: str = STORAGE_ROOT, user: dict = Depends(get_curr
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
         cursor = await db.execute("SELECT path FROM favorites")
-        rows = await cursor.fetchall()
+        rows = filter_visible_rows(user, await cursor.fetchall(), "path")
         favorites = {row["path"] for row in rows}
+        if is_admin_user(user):
+            user_rows = await (await db.execute('SELECT username FROM users')).fetchall()
+            favorites.update(get_user_folder_path(row["username"]) for row in user_rows)
+        else:
+            favorites.add(get_user_folder_path(user["username"]))
         cursor = await db.execute("""
             SELECT ft.path, t.name, t.color
             FROM file_tags ft
@@ -829,6 +961,10 @@ async def get_files_list(path: str = STORAGE_ROOT, user: dict = Depends(get_curr
                     stat = entry.stat()
                     name = entry.name
                     entry_path = entry.path
+                    if not user_can_access_path(user, entry_path):
+                        continue
+                    if not is_admin_user(user) and os.path.realpath(entry_path) == os.path.realpath(get_user_folders_root()):
+                        continue
                     
                     if entry.is_dir():
                         item_type = "Folder"
@@ -944,7 +1080,7 @@ async def get_duplicate_files(
                 ON f.content_hash = dk.content_hash
             ORDER BY dk.total_size DESC, dk.duplicate_count DESC, dk.content_hash ASC, f.filepath ASC
         """, (trash_path_prefix, limit, offset))
-        rows = await cursor.fetchall()
+        rows = filter_visible_rows(user, await cursor.fetchall())
 
     groups_by_key = {}
     duplicate_groups = []
@@ -971,9 +1107,16 @@ async def get_duplicate_files(
             "modified": row["modified_time"],
         })
 
+    visible_groups = []
+    for group in duplicate_groups:
+        group["count"] = len(group["files"])
+        if group["count"] > 1:
+            group["wasted_size"] = (group["count"] - 1) * (group["size"] or 0)
+            visible_groups.append(group)
+
     return {
-        "duplicates": duplicate_groups,
-        "total_groups": total_groups,
+        "duplicates": visible_groups,
+        "total_groups": len(visible_groups) if not is_admin_user(user) else total_groups,
         "limit": limit,
         "offset": offset,
         "match_strategy": "sha256",
@@ -982,41 +1125,39 @@ async def get_duplicate_files(
 @app.get("/api/thumbnail")
 async def get_thumbnail(path: str, user: dict = Depends(get_current_user)):
     path = resolve_storage_path(path)
+    require_path_access(user, path)
 
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File not found")
 
     ext = os.path.splitext(path)[1].lower().replace(".", "")
-    if ext not in IMAGE_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Not an image")
+    if ext not in IMAGE_EXTENSIONS and ext not in VIDEO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Not a supported thumbnail file")
 
     try:
-        stat = os.stat(path)
+        profile = VIDEO_THUMB_PROFILE if ext in VIDEO_EXTENSIONS else IMAGE_THUMB_PROFILE
+        thumb_path = get_thumbnail_cache_path(path, profile)
     except OSError:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # 384px covers 3x mobile square tiles while keeping cached files small.
-    thumb_profile = "sq384-q88-v2"
-    cache_key = f"{path}:{stat.st_size}:{stat.st_mtime_ns}:{thumb_profile}"
-    path_hash = hashlib.md5(cache_key.encode('utf-8')).hexdigest()
-    thumbnails_dir = os.path.join(os.path.dirname(__file__), "..", "data", "thumbnails")
-    thumb_path = os.path.join(thumbnails_dir, f"{path_hash}.jpg")
-
     if not os.path.exists(thumb_path):
         try:
-            with Image.open(path) as img:
-                img.draft('RGB', (768, 768))
-                img = ImageOps.exif_transpose(img)
-                if img.mode not in {'RGB', 'L'}:
-                    img = img.convert('RGBA')
-                    background = Image.new('RGBA', img.size, (255, 255, 255, 255))
-                    background.alpha_composite(img)
-                    img = background.convert('RGB')
-                elif img.mode != 'RGB':
-                    img = img.convert('RGB')
+            if ext in VIDEO_EXTENSIONS:
+                generate_video_thumbnail(path, thumb_path)
+            else:
+                with Image.open(path) as img:
+                    img.draft('RGB', (768, 768))
+                    img = ImageOps.exif_transpose(img)
+                    if img.mode not in {'RGB', 'L'}:
+                        img = img.convert('RGBA')
+                        background = Image.new('RGBA', img.size, (255, 255, 255, 255))
+                        background.alpha_composite(img)
+                        img = background.convert('RGB')
+                    elif img.mode != 'RGB':
+                        img = img.convert('RGB')
 
-                thumb = ImageOps.fit(img, (384, 384), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
-                thumb.save(thumb_path, "JPEG", quality=88, optimize=True, progressive=True, subsampling=1)
+                    thumb = ImageOps.fit(img, (384, 384), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+                    thumb.save(thumb_path, "JPEG", quality=88, optimize=True, progressive=True, subsampling=1)
         except Exception as e:
             print(f"Error generating thumbnail for {path}: {e}")
             raise HTTPException(status_code=500, detail="Error generating thumbnail")
@@ -1037,12 +1178,14 @@ class DeleteRequest(BaseModel):
 @app.post("/api/files/rename")
 async def rename_file(req: RenameRequest, user: dict = Depends(get_current_user)):
     old_path = resolve_storage_path(req.path)
+    require_path_access(user, old_path)
         
     if not os.path.exists(old_path):
         raise HTTPException(status_code=404, detail="File or folder not found")
         
     parent_dir = os.path.dirname(old_path)
     new_path = safe_child_path(parent_dir, req.new_name)
+    require_path_access(user, new_path)
     
     if os.path.exists(new_path):
         raise HTTPException(status_code=400, detail="A file or folder with this name already exists")
@@ -1078,6 +1221,8 @@ async def rename_file(req: RenameRequest, user: dict = Depends(get_current_user)
 @app.post("/api/files/delete")
 async def delete_file(req: DeleteRequest, user: dict = Depends(get_current_user)):
     path = resolve_storage_path(req.path)
+    require_path_access(user, path)
+    require_no_unowned_private_descendants(user, path)
         
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File or folder not found")
@@ -1111,15 +1256,37 @@ async def delete_file(req: DeleteRequest, user: dict = Depends(get_current_user)
 @app.get("/api/files/raw")
 async def get_raw_file(path: str, user: dict = Depends(get_current_user)):
     path = resolve_storage_path(path)
+    require_path_access(user, path)
         
     if not os.path.exists(path) or os.path.isdir(path):
         raise HTTPException(status_code=404, detail="File not found")
         
     return FileResponse(path)
 
+
+@app.get("/api/files/preview")
+async def get_preview_file(path: str, user: dict = Depends(get_current_user)):
+    path = resolve_storage_path(path)
+    require_path_access(user, path)
+
+    if not os.path.exists(path) or os.path.isdir(path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = os.path.splitext(path)[1].lower().replace(".", "")
+    if ext in VIDEO_PREVIEW_EXTENSIONS:
+        try:
+            preview_path = get_video_preview_cache_path(path)
+        except OSError:
+            raise HTTPException(status_code=404, detail="File not found")
+        if os.path.exists(preview_path):
+            return FileResponse(preview_path, media_type="video/mp4")
+
+    return FileResponse(path)
+
 @app.get("/api/files/text")
 async def get_text_file(path: str, user: dict = Depends(get_current_user)):
     path = resolve_storage_path(path)
+    require_path_access(user, path)
         
     if not os.path.exists(path) or os.path.isdir(path):
         raise HTTPException(status_code=404, detail="File not found")
@@ -1134,7 +1301,9 @@ async def get_text_file(path: str, user: dict = Depends(get_current_user)):
 @app.post("/api/files/mkdir")
 async def create_directory(req: MkdirRequest, user: dict = Depends(get_current_user)):
     parent_dir = resolve_storage_path(req.path)
+    require_path_access(user, parent_dir)
     target_dir = safe_child_path(parent_dir, req.folder_name)
+    require_path_access(user, target_dir)
         
     if os.path.exists(target_dir):
         raise HTTPException(status_code=400, detail="Folder already exists")
@@ -1147,11 +1316,6 @@ async def create_directory(req: MkdirRequest, user: dict = Depends(get_current_u
                 INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
                 VALUES (?, ?, 'directory', 0, ?)
             ''', (req.folder_name, target_dir, mod_time))
-            if user.get("role") != "admin":
-                await db.execute('''
-                    INSERT OR REPLACE INTO file_permissions (path, username, permission, granted_by, created_at)
-                    VALUES (?, ?, 'full', ?, ?)
-                ''', (target_dir, user["username"], user["username"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
             await db.commit()
         return {"status": "success", "path": target_dir}
     except Exception as e:
@@ -1165,6 +1329,7 @@ async def upload_file(
     user: dict = Depends(get_current_user)
 ):
     path = resolve_storage_path(path)
+    require_path_access(user, path)
         
     if not os.path.exists(path) or not os.path.isdir(path):
         raise HTTPException(status_code=400, detail="Target path is not a directory")
@@ -1175,6 +1340,7 @@ async def upload_file(
     else:
         safe_filename = os.path.basename(upload_path)
         target_filepath = safe_child_path(path, safe_filename)
+    require_path_access(user, target_filepath)
     safe_filename = os.path.basename(target_filepath)
     created_dirs = []
     parent_dir = os.path.dirname(target_filepath)
@@ -1226,23 +1392,25 @@ async def upload_file(
                     INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time)
                     VALUES (?, ?, 'directory', 0, ?)
                 ''', (os.path.basename(folder_path), folder_path, folder_mod_time))
-                if user.get("role") != "admin":
-                    await db.execute('''
-                        INSERT OR REPLACE INTO file_permissions (path, username, permission, granted_by, created_at)
-                        VALUES (?, ?, 'full', ?, ?)
-                    ''', (folder_path, user["username"], user["username"], now))
 
             await db.execute('''
                 INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time, content_hash)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (safe_filename, target_filepath, ext, size, mod_time, file_hash))
-            if user.get("role") != "admin":
-                await db.execute('''
-                    INSERT OR REPLACE INTO file_permissions (path, username, permission, granted_by, created_at)
-                    VALUES (?, ?, 'full', ?, ?)
-                ''', (target_filepath, user["username"], user["username"], now))
             await db.commit()
-            
+
+        if ext in VIDEO_EXTENSIONS:
+            try:
+                generate_video_thumbnail(target_filepath, get_thumbnail_cache_path(target_filepath, VIDEO_THUMB_PROFILE))
+            except Exception as e:
+                print(f"Error generating upload video thumbnail for {target_filepath}: {e}")
+            if ext in VIDEO_PREVIEW_EXTENSIONS:
+                try:
+                    script = os.path.join(os.path.dirname(__file__), "..", "scripts", "generate_video_previews.py")
+                    subprocess.Popen(["python", script, "--path", target_filepath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception as e:
+                    print(f"Error starting video preview converter: {e}")
+
         return {"status": "success", "filepath": target_filepath}
     except HTTPException:
         raise
@@ -1257,6 +1425,7 @@ async def save_edited_image(
     user: dict = Depends(get_current_user)
 ):
     original_path = resolve_storage_path(path)
+    require_path_access(user, original_path)
     if not os.path.exists(original_path) or os.path.isdir(original_path):
         raise HTTPException(status_code=404, detail="Original image not found")
 
@@ -1272,10 +1441,12 @@ async def save_edited_image(
 
     candidate_name = f"{stem}-edited.{output_ext}"
     target_path = safe_child_path(parent_dir, candidate_name)
+    require_path_access(user, target_path)
     counter = 2
     while os.path.exists(target_path):
         candidate_name = f"{stem}-edited-{counter}.{output_ext}"
         target_path = safe_child_path(parent_dir, candidate_name)
+        require_path_access(user, target_path)
         counter += 1
 
     try:
@@ -1300,11 +1471,6 @@ async def save_edited_image(
             INSERT OR REPLACE INTO files (filename, filepath, extension, size_bytes, modified_time, content_hash)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (candidate_name, target_path, output_ext, size, mod_time, file_hash))
-        if user.get("role") != "admin":
-            await db.execute("""
-                INSERT OR REPLACE INTO file_permissions (path, username, permission, granted_by, created_at)
-                VALUES (?, ?, 'full', ?, ?)
-            """, (target_path, user["username"], user["username"], now))
         await db.commit()
 
     await log_activity("image_edit_save", target_path, user["username"], original_path)
@@ -1321,9 +1487,9 @@ async def search_files(q: str = "", user: dict = Depends(get_current_user)):
             SELECT filename, filepath, extension, size_bytes, modified_time 
             FROM files 
             WHERE filename LIKE ? 
-            LIMIT 50
+            LIMIT 500
         ''', (query_pattern,))
-        rows = await cursor.fetchall()
+        rows = filter_visible_rows(user, await cursor.fetchall())[:50]
         tags_by_path = await get_tags_for_paths(db, [row["filepath"] for row in rows])
         
         results = []
@@ -1394,17 +1560,16 @@ async def get_files_by_category(
             where_clause = f"extension NOT IN ({placeholders}) AND extension != 'directory'"
             params = tuple(media_extensions)
 
-        count_cursor = await db.execute(f"SELECT COUNT(*) AS total FROM files WHERE {where_clause}", params)
-        total = (await count_cursor.fetchone())["total"]
         query = f'''
             SELECT filename, filepath, extension, size_bytes, modified_time
             FROM files
             WHERE {where_clause}
             ORDER BY datetime(modified_time) DESC, lower(filename) ASC
-            LIMIT ? OFFSET ?
         '''
-        cursor = await db.execute(query, params + (limit, offset))
-        rows = await cursor.fetchall()
+        cursor = await db.execute(query, params)
+        visible_rows = filter_visible_rows(user, await cursor.fetchall())
+        total = len(visible_rows)
+        rows = visible_rows[offset:offset + limit]
         tags_by_path = await get_tags_for_paths(db, [row["filepath"] for row in rows])
         
         results = []
@@ -1449,6 +1614,7 @@ async def bulk_favorite(req: BulkFavoriteRequest, user: dict = Depends(get_curre
         for item in req.items:
             try:
                 item.path = resolve_storage_path(item.path)
+                require_path_access(user, item.path)
             except HTTPException:
                 continue
             await db.execute('''
@@ -1467,6 +1633,8 @@ async def bulk_delete(req: BulkDeleteRequest, user: dict = Depends(get_current_u
         for path in req.paths:
             try:
                 path = resolve_storage_path(path)
+                require_path_access(user, path)
+                require_no_unowned_private_descendants(user, path)
             except HTTPException:
                 continue
             if os.path.exists(path):
@@ -1500,11 +1668,14 @@ async def bulk_download(req: BulkDeleteRequest, user: dict = Depends(get_current
         for path in req.paths:
             try:
                 path = resolve_storage_path(path)
+                require_path_access(user, path)
+                require_no_unowned_private_descendants(user, path)
             except HTTPException:
                 continue
             if os.path.exists(path):
                 if os.path.isdir(path):
-                    for root, _, files in os.walk(path):
+                    for root, dirs, files in os.walk(path):
+                        dirs[:] = [dirname for dirname in dirs if user_can_access_path(user, os.path.join(root, dirname))]
                         for file in files:
                             file_path = os.path.join(root, file)
                             rel_path = os.path.relpath(file_path, os.path.dirname(path))
@@ -1568,6 +1739,7 @@ async def create_user(req: UserCreateRequest, request: Request, user: dict = Dep
                 INSERT INTO users (username, password_hash, salt, role, display_name, first_login_code_hash, first_login_code_salt)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (req.username, hashed, salt, req.role, req.display_name, code_hash, code_salt))
+            await ensure_user_folder_record(db, req.username, req.display_name)
             await db.commit()
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="Username already exists")
@@ -1598,7 +1770,6 @@ async def delete_user(username: str, request: Request, user: dict = Depends(get_
             await db.commit()
             raise HTTPException(status_code=404, detail="User not found")
         await db.execute('DELETE FROM user_devices WHERE username = ?', (username,))
-        await db.execute('DELETE FROM file_permissions WHERE username = ? OR granted_by = ?', (username, username))
         await db.commit()
     await log_activity("user_delete", username, user["username"])
     return {"status": "success"}
@@ -1606,6 +1777,7 @@ async def delete_user(username: str, request: Request, user: dict = Depends(get_
 @app.get("/api/files/details")
 async def file_details(path: str, user: dict = Depends(get_current_user)):
     path = resolve_storage_path(path)
+    require_path_access(user, path)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Item not found")
     stat = os.stat(path)
@@ -1622,6 +1794,9 @@ async def file_details(path: str, user: dict = Depends(get_current_user)):
 async def copy_item(req: FileOperationRequest, user: dict = Depends(get_current_user)):
     source = resolve_storage_path(req.source_path)
     target_dir = resolve_storage_path(req.target_dir)
+    require_path_access(user, source)
+    require_path_access(user, target_dir)
+    require_no_unowned_private_descendants(user, source)
     if not os.path.exists(source):
         raise HTTPException(status_code=404, detail="Item not found")
     if not os.path.isdir(target_dir):
@@ -1634,6 +1809,7 @@ async def copy_item(req: FileOperationRequest, user: dict = Depends(get_current_
         if target_inside_source:
             raise HTTPException(status_code=400, detail="Cannot copy a folder into itself or one of its subfolders")
     target = safe_child_path(target_dir, req.new_name or os.path.basename(source))
+    require_path_access(user, target)
     if os.path.exists(target):
         raise HTTPException(status_code=400, detail="Target already exists")
     if os.path.isdir(source):
@@ -1653,6 +1829,9 @@ async def copy_item(req: FileOperationRequest, user: dict = Depends(get_current_
 async def move_item(req: FileOperationRequest, user: dict = Depends(get_current_user)):
     source = resolve_storage_path(req.source_path)
     target_dir = resolve_storage_path(req.target_dir)
+    require_path_access(user, source)
+    require_path_access(user, target_dir)
+    require_no_unowned_private_descendants(user, source)
     if not os.path.exists(source):
         raise HTTPException(status_code=404, detail="Item not found")
     if not os.path.isdir(target_dir):
@@ -1665,6 +1844,7 @@ async def move_item(req: FileOperationRequest, user: dict = Depends(get_current_
         if target_inside_source:
             raise HTTPException(status_code=400, detail="Cannot move a folder into itself or one of its subfolders")
     target = safe_child_path(target_dir, req.new_name or os.path.basename(source))
+    require_path_access(user, target)
     if os.path.exists(target):
         raise HTTPException(status_code=400, detail="Target already exists")
     shutil.move(source, target)
@@ -1684,6 +1864,7 @@ async def list_trash(user: dict = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
         rows = await (await db.execute('SELECT id, original_path, name, type, size_bytes, deleted_by, deleted_at FROM trash_items ORDER BY id DESC')).fetchall()
+        rows = filter_visible_rows(user, rows, "original_path")
     return {"trash": [dict(row) for row in rows]}
 
 @app.delete("/api/trash")
@@ -1720,6 +1901,7 @@ async def restore_trash(item_id: int, user: dict = Depends(get_current_user)):
         row = await (await db.execute('SELECT * FROM trash_items WHERE id = ?', (item_id,))).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Trash item not found")
+        require_path_access(user, row["original_path"])
         restore_path = row["original_path"]
         if os.path.exists(restore_path):
             restore_path = os.path.join(os.path.dirname(restore_path), f"restored_{int(time.time())}_{row['name']}")
@@ -1737,6 +1919,7 @@ async def permanently_delete_trash(item_id: int, user: dict = Depends(get_curren
         row = await (await db.execute('SELECT * FROM trash_items WHERE id = ?', (item_id,))).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Trash item not found")
+        require_path_access(user, row["original_path"])
         if os.path.isdir(row["trash_path"]):
             shutil.rmtree(row["trash_path"], ignore_errors=True)
         elif os.path.exists(row["trash_path"]):
@@ -1749,6 +1932,7 @@ async def permanently_delete_trash(item_id: int, user: dict = Depends(get_curren
 @app.post("/api/share")
 async def create_share(req: ShareCreateRequest, user: dict = Depends(get_current_user)):
     path = resolve_storage_path(req.path)
+    require_path_access(user, path)
     if not os.path.exists(path) or os.path.isdir(path):
         raise HTTPException(status_code=404, detail="File not found")
     token = secrets.token_urlsafe(18)
@@ -1772,7 +1956,8 @@ async def get_shared_file(token: str):
 async def activity(user: dict = Depends(get_current_user)):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
-        rows = await (await db.execute('SELECT action, path, actor, created_at, details FROM activity_log ORDER BY id DESC LIMIT 100')).fetchall()
+        rows = await (await db.execute('SELECT action, path, actor, created_at, details FROM activity_log ORDER BY id DESC LIMIT 300')).fetchall()
+        rows = [row for row in rows if not row["path"] or user_can_access_path(user, row["path"] or "")][:100]
     return {"activity": [dict(row) for row in rows]}
 
 @app.get("/api/admin/activity")
